@@ -65,7 +65,10 @@ if not exist "%~dp0build.js" goto NOTOGETHER
 if not exist "%MAKER%" goto NOMAKER
 
 rem ---- locate node (required: step 2) ------------------------------------
-where node >nul 2>nul
+rem  Probe by RUNNING it, not by `where`: a Microsoft Store "app execution
+rem  alias" or a half-uninstalled runtime also satisfies `where node`, and then
+rem  fails every real command. Running `node --version` covers both cases.
+node --version >nul 2>nul
 if errorlevel 1 goto NONODE
 
 rem ---- locate a Python 3 interpreter (optional: step 1) ------------------
@@ -95,6 +98,20 @@ set "PYCMD=python"
 goto HAVEPY
 
 :HAVEPY
+rem ---- but does it actually RUN? ------------------------------------------
+rem  "where py" / "where python" only prove the NAME exists, and on Windows
+rem  that is not the same thing:
+rem    * "python" is frequently the Microsoft Store "app execution alias"
+rem      (a 0-byte reparse point) which opens the Store instead of running;
+rem    * "py.exe" is sometimes a launcher left behind by an uninstalled Python.
+rem  Both pass `where`, then fail the real command. Before this probe that
+rem  failure fell through to CHARTFAIL, which exits non-zero and skips step 2
+rem  entirely - so a machine without a *working* Python could not even rebuild
+rem  skins. Probe by executing it: if it cannot run, treat Python as absent
+rem  (the intended NOPY_SKIP warning path) instead of aborting the build.
+"%PYCMD%" %PYARG% -c "import sys" >nul 2>nul
+if errorlevel 1 goto PYDEAD
+
 echo ============================================================
 echo  Step 1/2   Charts - generate only what is missing
 echo ============================================================
@@ -103,9 +120,18 @@ set "RC=%ERRORLEVEL%"
 if not "%RC%"=="0" goto CHARTFAIL
 goto STEP2
 
+:PYDEAD
+echo.
+echo [warn] Found "%PYCMD%" on PATH, but it cannot run Python 3.
+echo        This is usually the Microsoft Store "app alias" stub, or a
+echo        launcher whose Python was uninstalled.
+echo        Treating Python as unavailable; continuing with step 2 only.
+echo.
+goto NOPY_SKIP
+
 :NOPY_SKIP
 echo ============================================================
-echo  Step 1/2   SKIPPED - no Python 3 interpreter was found
+echo  Step 1/2   SKIPPED - no working Python 3 interpreter available
 echo ============================================================
 echo  Charts will NOT be generated. Existing songs are unaffected,
 echo  and step 2 still runs, so SKINS are rebuilt normally.
@@ -184,7 +210,8 @@ exit /b 1
 
 :NONODE
 echo.
-echo [err] Node.js was not found on PATH.
+echo [err] Node.js was not found, or could not be run.
+echo       Step 2 needs it (step 1 - charts - does not).
 echo       Install Node.js from https://nodejs.org, or - if it is installed
 echo       but just not on PATH - call it explicitly, e.g.:
 echo         "<path-to-node>\node.exe" "%~dp0build.js"

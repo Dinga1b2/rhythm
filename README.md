@@ -37,6 +37,9 @@
 项目刻意避开了 `file://` 下受限的能力（不用 `fetch` 读数据、不用 canvas 读像素），
 所以**不需要起本地服务器**。
 
+> **只想玩的话，什么都不用装** —— 也不用运行下面任何一个构建脚本。仓库里已带成品数据。
+> 构建脚本只在你**想自己加曲子 / 皮肤**时才需要（详见文末「常见问题」）。
+
 ---
 
 ## 目录结构
@@ -46,7 +49,7 @@ index.html            选曲页（入口，双击这个）
 player.html           游玩页（由选曲页自动打开）
 chart.js              谱面解析器
 build.js              一键打包脚本（可选，需要 Node）
-build.cmd             Windows 双击版一键构建（可选）
+build.cmd             Windows 双击版一键构建（可选；打包需 Node，补谱面另需 Python）
 gen_songs.js          曲目 → music/charts.js
 gen_palette.js        皮肤 → role/palette.js + role/skins.js
 _term.js              终端中文编码防护
@@ -95,6 +98,9 @@ role/                 皮肤，每套一个文件夹
 | macOS / Linux | 先装 Python 3 与 Node，然后 `cd rhythm && python "music/Sheet Music Maker.py" --missing && node build.js` |
 
 已有的曲目和皮肤**完全不会被改动**。
+
+> ⚠ 这一步里"补谱面"**需要 Python 3**。机器上没有 Python 时 `build.cmd` 会跳过它并明确提示，
+> 但这样一来**新歌不会出现在选曲页**（它还没有谱面）。只加皮肤则不需要 Python。
 
 ### 新增一套皮肤
 
@@ -148,8 +154,33 @@ A：本项目**已经把所有资源文件名改成纯 ASCII**（皮肤文件夹
 另外，如果你**自己**往 `role/` 里放了中文名的皮肤文件夹，也会踩到同样的坑：
 请改用英文文件夹名，把中文显示名写进 `skin.json`（构建时会给出警告）。
 
-**Q：我没有 Node / Python，能用吗？**
-A：**能。** 直接双击 `index.html`。构建脚本只有你想自己加曲子/皮肤时才需要。
+**Q：我电脑上没有 Python，双击 `build.cmd` 还能正常跑吗？**
+A：**能跑，但会跳过第 1 步。** 构建脚本包含两步：
+
+| 步骤 | 做什么 | 需要 |
+| :--- | :--- | :--- |
+| 第 1 步 | 给"有音频、但还没有谱面"的曲子补 `.txt` 谱面 | **Python 3**（librosa） |
+| 第 2 步 | 重新打包 `music/charts.js` 和 `role/skins.js` + `role/palette.js` | **Node.js** |
+
+没有可用的 Python 时，脚本会打印一段警告，**跳过第 1 步、第 2 步照跑**，正常结束（退出码 0）。
+所以具体后果是：
+
+- **只是加 / 换皮肤** → 完全不受影响，皮肤照常重建。
+- **加了新歌** → 新歌不会出现在选曲页（它还没有谱面）。装个 Python 再双击一次即可，
+  或者手动指定解释器：`set RHYTHM_PYTHON=D:\Python313\python.exe` 之后再运行 `build.cmd`。
+
+反过来，**没有 Node 则第 2 步会直接失败**（第 1 步不需要 Node）。
+
+> 顺带说明：脚本现在是**实际运行一下**解释器来确认它可用（`node --version`、
+> `python -c "import sys"`），而不是只用 `where` 找名字 —— 在 Windows 上"名字在 PATH 里"
+> 不等于"能跑"：Microsoft Store 的"应用执行别名"和卸载 Python 残留的 `py.exe`
+> 都能被 `where` 找到，一执行却失败。这类情况现在会被当成"没有可用解释器"，
+> 走上面那条警告路径，而不是把整个构建掐断。
+
+**Q：我只想玩，需要跑构建脚本吗？**
+A：**完全不需要。** 仓库里已经带了成品数据（3 首曲子 + 3 套皮肤，以及运行时要读的
+`charts.js` / `skins.js` / `palette.js`），**直接双击 `index.html` 就能玩**。
+构建脚本只有你想自己加曲子 / 皮肤时才用。
 
 **Q：music 下的 `.txt` 谱面文件是干什么的？**
 A：谱面的**纯文本源文件**。运行时实际读的是 `music/charts.js`（已把谱面内嵌进去），
