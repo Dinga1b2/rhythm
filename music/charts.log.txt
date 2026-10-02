@@ -1,0 +1,5 @@
+[ok] Da_Capo: 95 tap + 142 hold = 237 notes, BPM 110, 6K, OFFSET 2971, SILENCE 811
+[ok] Only_By_Chasing_the_Wind: 96 tap + 142 hold = 238 notes, BPM 110, 6K, OFFSET 3029, SILENCE 869
+[ok] qinglian: 100 tap + 149 hold = 249 notes, BPM 110, 6K, OFFSET 3000, SILENCE 840
+写出 rhythm\music\charts.js（共 3 首）
+环境：console: cp=65001 tty=true utf8=true

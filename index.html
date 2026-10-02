@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>音游 · 曲目选择</title>
+<style>
+  /* ===== 浅青主题（与主模块面板一致） ===== */
+  :root {
+    --bg-color: #E0F7FA;
+    --card-bg: #FFFFFF;
+    --card-border: #B2EBF2;
+    --card-hover-bg: #B2EBF2;
+    --text-primary: #006064;
+    --text-secondary: #00838F;
+    --accent: #00ACC1;
+    --shadow: 0 2px 8px rgba(0, 96, 100, 0.08);
+    --shadow-hover: 0 4px 16px rgba(0, 96, 100, 0.15);
+    --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    min-height: 100vh;
+    background-color: var(--bg-color);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    color: var(--text-primary);
+    padding: 28px 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+  .head { max-width: 980px; margin: 0 auto 20px; display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; }
+  .head h1 { font-size: 24px; }
+  .head .sub { color: var(--text-secondary); font-size: 13px; }
+  .back {
+    margin-left: auto; text-decoration: none; font-size: 13px;
+    color: var(--text-secondary); border: 1px solid var(--card-border);
+    background: var(--card-bg); padding: 6px 14px; border-radius: 8px;
+  }
+  .back:hover { background: var(--card-hover-bg); }
+
+  .grid { max-width: 980px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
+  .song-card {
+    display: flex; flex-direction: column; gap: 8px;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 20px 18px;
+    text-decoration: none; color: inherit; cursor: pointer;
+    transition: transform 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
+  }
+  .song-card:hover { background: var(--card-hover-bg); transform: translateY(-2px); box-shadow: var(--shadow-hover); }
+  .song-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .song-card .name { font-size: 19px; font-weight: 700; }
+  .song-card .meta { font-size: 13px; color: var(--text-secondary); line-height: 1.7; }
+  .song-card .best { font-size: 12px; color: var(--text-secondary); }
+  .song-card .best b { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+  .song-card .go { margin-top: 6px; font-size: 13px; font-weight: 700; color: var(--accent); }
+
+  .empty { max-width: 980px; margin: 40px auto; text-align: center; color: var(--text-secondary); line-height: 2; }
+  .empty code { background: #fff; border: 1px solid var(--card-border); padding: 2px 8px; border-radius: 6px; }
+
+  /* 新增资源说明（怎么加曲目 / 加皮肤） */
+  .hint {
+    max-width: 980px; margin: 26px auto 0;
+    background: var(--card-bg); border: 1px dashed var(--card-border);
+    border-radius: var(--radius); padding: 16px 18px;
+    font-size: 13px; line-height: 2; color: var(--text-secondary);
+  }
+  .hint h2 { font-size: 14px; margin-bottom: 6px; color: var(--text-primary); }
+  .hint b { color: var(--text-primary); }
+  .hint code { background: var(--bg-color); border: 1px solid var(--card-border); padding: 2px 7px; border-radius: 6px; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <h1>🎵 音游</h1>
+    <span class="sub">六键位下落式（S D F J K L） · 曲目互相独立 · 点击在新网页开始</span>
+    <a class="back" href="../index.html">← 模块面板</a>
+  </div>
+
+  <div class="grid" id="songGrid"></div>
+  <div class="empty" id="emptyTip" style="display:none">
+    曲库为空：先在 <code>rhythm/music/</code> 下新建一个文件夹（文件夹名 = 曲名），<br>
+    放一个 <code>.mp3</code> 进去（<b>不用</b>准备谱面），再跑一次 <code>node rhythm/build.js</code><br>
+    （在 rhythm/ 下则 <code>node build.js</code>；<b>Windows 直接双击 <code>rhythm/build.cmd</code></b>
+    —— 它会自动补好谱面再打包）。
+  </div>
+
+  <!-- 本地新增资源操作（点开看到就好，用不着就关） -->
+  <div class="hint">
+    <h2>本地新增曲目 / 皮肤（连谱面都自动生成）</h2>
+    <b>新增曲目</b>：在 <code>rhythm/music/曲名/</code> 里放一个 <code>.mp3</code> 即可（<b>不需要</b>自己写谱面）<br>
+    <b>新增皮肤</b>：在 <code>rhythm/role/皮肤名/</code> 里放四张 png：
+    <code>Background.png / D.png / R.png / Trailing.png</code>（缺图不报错，会降级；<br>
+    想调整显示名或顺序可在该文件夹下加 <code>skin.json</code>，写 <code>{"name":"显示名","order":10}</code>）<br>
+    然后跑 <code>node rhythm/build.js</code>，皮肤可在 <b>多套</b>，游戏页右侧「皮肤栏」会一一列出，点一下即换。<br>
+    <b>Windows 用户直接双击 <code>rhythm/build.cmd</code></b>：它会先为缺谱面的曲目自动生成谱面，
+    再重新打包曲库与皮肤 —— 打一次命令就够，已有的曲目和皮肤完全不会被改动。
+  </div>
+
+  <script src="music/charts.js"></script>
+  <script>
+  'use strict';
+  /**
+   * 曲目选择页：读取 window.RHYTHM_SONGS（由 music/charts.js 提供）渲染全部曲目。
+   * 每张卡片 target=_blank → 点击独立新开一个游玩网页（互不影响）。
+   * 键位说明：D=短按，B→E=长按（按住至结尾），准备期 3 秒后歌曲出声即为 0ms。
+   */
+  function render() {
+    var songs = window.RHYTHM_SONGS || {};
+    var ids = Object.keys(songs);
+    var grid = document.getElementById('songGrid');
+
+    if (!ids.length) {
+      document.getElementById('emptyTip').style.display = 'block';
+      return;
+    }
+
+    grid.innerHTML = ids.map(function (id) {
+      var s = songs[id];
+      var best = null;
+      try { best = JSON.parse(localStorage.getItem('rhythm_best_' + id) || 'null'); } catch (e) {}
+
+      var bestHtml = best
+        ? '<span class="best">历史最佳：<b>' + best.score.toLocaleString() + '</b>（' +
+          best.rank + ' · ' + best.acc + '% · ' + best.maxCombo + ' 连击）</span>'
+        : '<span class="best">暂无记录 —— 来刷新纪录吧</span>';
+
+      return '<a class="song-card" href="player.html?r=26#song=' + id + '" target="_blank" rel="noopener noreferrer">' +
+        '<span class="name">' + esc(s.title) + '</span>' +
+        '<span class="meta">BPM ' + s.bpm + ' · ' + s.keyCount + 'K · ' + s.tapCount + ' 短按 + ' + s.holdCount + ' 长按</span>' +
+        bestHtml +
+        '<span class="go">▶ 点击开始（3 秒准备后进入）</span>' +
+        '</a>';
+    }).join('');
+  }
+
+  function esc(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  render();
+  </script>
+</body>
+</html>

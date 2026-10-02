@@ -1,0 +1,2248 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<title>音游 · 轻涟</title>
+<style>
+  /* ===== 主题变量（深色，与 tetris 一致风格） ===== */
+  :root {
+    --bg: #0e1018;
+    --panel: rgba(20,24,36,0.55);
+    --line: var(--w-faint);
+    --text: #f4f6ff;
+    --text-dim: #aab2cc;
+    --judge-y: 60px;            /* 判定线距轨道底部 */
+    --lane-w: 124px;            /* 默认桌面宽轨道 */
+    --perfect: #ffe082;
+    --great:   #b39ddb;
+    --good:    #a5d6a7;
+    --miss:    #ef9a9a;
+    /* v2.15 白色透明度令牌：原来全文件散着 62 处 rgba(255,255,255,α)、31 种取值
+       （0.18 / 0.19 / 0.20 / 0.22 这类肉眼分不出的并存），想整体调一档亮度
+       得在几十行里翻。现在归成 7 档语义，取值取各簇的众数（视觉差异 ≤0.05 为主）：
+         ghost  ≈ 0.03  轨道底纹、最淡的底
+         hair   ≈ 0.07  分隔线、轨道竖线
+         faint  ≈ 0.12  面板底、未激活元素
+         line   ≈ 0.18  可见边框（按钮/胶囊的边缘）
+         mid    ≈ 0.26  较亮的边框、反馈层渐变
+         soft   ≈ 0.55  判定线、次要文字
+         strong ≈ 0.85  受体点、主要文字、辉光
+       渐变里的"全透明"仍写 rgba(255,255,255,0)，它不是一档亮度而是一个端点。 */
+    --w-ghost:  rgba(255,255,255,0.03);
+    --w-hair:   rgba(255,255,255,0.07);
+    --w-faint:  rgba(255,255,255,0.12);
+    --w-line:   rgba(255,255,255,0.18);
+    --w-mid:    rgba(255,255,255,0.26);
+    --w-soft:   rgba(255,255,255,0.55);
+    --w-strong: rgba(255,255,255,0.85);
+    /* v2.15 打击感：环境律动（整场呼吸）的颜色。与 --lane2 同色系但独立命名，
+       想单独调"氛围绕光"时不必连轨道配色一起动。 */
+    --beat-col: #ffe082;
+    /* 按键圆点颜色：由 applySkin() 从 role/palette.js 的 key 字段写入。
+       这里只是清单加载前的默认值。 */
+    --key-col: rgba(255,255,255,0.85);
+    /* 梦幻配色：黄/金 + 紫 + 青 */
+    --lane0: #9fa8da; --lane1: #ce93d8; --lane2: #ffe082;
+    --lane3: #ffcc80; --lane4: #b39ddb; --lane5: #80deea;
+    /* 皮肤（v2.14）：背景 + 三种音符图都由 role/skins.js 的清单驱动，
+       右侧皮肤栏切换时统一改写这四个变量。下面只是清单加载前的默认值，
+       新增/更换皮肤不需要动这几行 —— 在 role/ 下加文件夹后跑 node build.js 即可。 */
+    --bg-image: url('role/芙宁娜/Background.png');   /* 背景图：role/<皮肤名>/Background.png */
+    --tap-image: url('role/芙宁娜/D.png');           /* 短按音符 */
+    --head-image: url('role/芙宁娜/R.png');          /* 长按头 / 尾 */
+    --trail-image: url('role/芙宁娜/Trailing.png');  /* 长按拖尾（只拉伸/收缩，不替换） */
+  }
+  /* 响应式断点统一放在样式表末尾的「响应式」一区（v2.15 收敛），见文件底部。
+     这里不再散着写媒体查询 —— 原来 --lane-w 用 1920/900/620/480、
+     #skinBar 用 780、顶栏用 560，两套并行且 480 那条与 560 完全重复（永不生效）。
+     顺带：--lane-w 一律用纯媒体查询而不是 clamp/min() —— 某些运行环境
+     对 clamp 解析异常会让宽度坍塌为 0（v1.3 的教训）。 */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    overflow: hidden;
+    user-select: none;
+  }
+  /* 背景风景图 + 模糊暗角（v1.9 降 blur 半径：18px 全屏实时模糊在低端 GPU 上
+     每帧合成会卡顿，导致音符 rAF 掉帧、看起来"瞬移"；8px 视觉几乎不变但便宜约 5 倍） */
+  #bgLayer {
+    position: fixed; inset: 0; z-index: 0;
+    background: var(--bg-image) center/cover no-repeat;
+    filter: blur(8px) brightness(0.55);
+    transform: scale(1.08);
+  }
+  #bgVignette {
+    position: fixed; inset: 0; z-index: 0;
+    background: radial-gradient(ellipse at center, rgba(10,14,26,0.2) 0%, rgba(10,14,26,0.65) 100%);
+    pointer-events: none;
+  }
+  #app { height: 100vh; display: flex; flex-direction: column; position: relative; z-index: 1; }
+
+  /* ===== v2.15 环境律动（#beatGlow）=====
+     整片场地的"呼吸"：在节拍网格上给一次短促提亮，把手上正在打的节奏
+     变成画面上的心跳。只用 opacity 驱动 + will-change 常驻合成层 → 每次脉冲
+     只是一次纯合成，不碰布局也不重绘。
+     特意**不用** mix-blend-mode:screen —— 全屏混合会让合成器每帧多做一次
+     全画布 blend，和当年删掉 #bgLayer 18px 模糊、去掉 .overlay backdrop-filter
+     是同一类开销（低端 GPU 上直接体现为掉帧）。径向渐变本身已经是"光斑"观感，
+     普通 alpha 合成在深色底上同样好看。
+     z-index:0 且排在 #lanes 之前（同为 0/auto 层按 DOM 顺序绘制）→ 压在轨道之下，
+     不会盖住音符。稀疏段/断连时不亮（由 beatStrength 决定），否则整场乱闪反而更吵。 */
+  #beatGlow {
+    position: absolute; inset: 0; z-index: 0;
+    pointer-events: none; opacity: 0;
+    background: radial-gradient(ellipse 72% 56% at 50% 92%,
+      var(--beat-col) 0%, rgba(255,255,255,0) 70%);
+    will-change: opacity;
+    /* v2.15.2：把这一层封成独立的布局/绘制边界 —— 它的重绘不会外溢到轨道区，
+       合成器也能把它单独提到一层。这里没有子元素，纯收益。 */
+    contain: layout paint;
+  }
+  /* 降低动态偏好：关掉环境律动与反馈过渡，保留"亮/不亮"的静态层级 */
+  @media (prefers-reduced-motion: reduce) {
+    #beatGlow { display: none; }
+    .lane-bg, #judgeLine { transition: none; }
+  }
+
+  /* ===== 顶栏（透明叠加） ===== */
+  header {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 6;
+    height: 56px; flex: 0 0 auto;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 18px;
+    background: linear-gradient(180deg, rgba(10,14,26,0.55), rgba(10,14,26,0));
+    pointer-events: none;
+  }
+  header > * { pointer-events: auto; }
+  header .title { font-weight: 600; font-size: 15px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #verTag { font-size: 11px; color: var(--w-soft); border: 1px solid var(--w-line); border-radius: 999px; padding: 1px 8px; }
+  header .title small { color: var(--w-soft); font-weight: 400; margin-left: 8px; }
+  #hudScore { position: absolute; left: 50%; transform: translateX(-50%); font-size: 26px; font-weight: 800; color: #fff; text-shadow: 0 2px 12px rgba(0,0,0,0.45); font-variant-numeric: tabular-nums; }
+  /* v2.15：准确率实时回执。挂在分数正下方、共用同一条绝对居中轴，
+     用 tabular-nums 固定字宽，数字跳动时不会左右抖。
+     零 MISS 时追加 FC / AP 徽章（见 updateHud）—— 玩家不用等到结算才知道自己打得好。 */
+  #hudAcc {
+    position: absolute; left: 50%; transform: translateX(-50%);
+    top: 47px; font-size: 11px; font-weight: 600; letter-spacing: 0.4px;
+    color: var(--w-soft); font-variant-numeric: tabular-nums;
+    white-space: nowrap; pointer-events: none;
+  }
+  #hudAcc.fc { color: var(--perfect); text-shadow: 0 0 12px rgba(255,224,130,0.5); }
+  .spacer { flex: 1; }
+  #progressWrap {
+    position: absolute; left: 0; right: 0; top: 0; height: 3px;
+    background: var(--w-faint); z-index: 7;
+    overflow: hidden;                    /* scaleX 只是视觉缩放，靠这一条裁掉溢出 */
+  }
+  /* v2.15：进度改走 transform: scaleX()，不再每帧写 width。
+     width 变化会进入布局（每帧一次，虽然元素很小，但和音符渲染抢同一帧预算）；
+     scaleX 全程停在合成层。代价是渐变本身跟着横向缩放 —— 这条只有 3px 高、
+     两端都贴屏幕边缘，看不出"光带是长出来的还是被拉长的"。 */
+  #progressBar {
+    height: 100%; width: 100%;
+    transform: scaleX(0); transform-origin: left center;
+    background: linear-gradient(90deg, var(--lane2), var(--lane4));
+    box-shadow: 0 0 10px rgba(255,224,130,0.5);
+    will-change: transform;
+  }
+  #vol { width: 90px; accent-color: var(--lane2); opacity: 0.85; }
+  #btnPause {
+    background: var(--w-faint); color: var(--text); border: 1px solid var(--w-line);
+    border-radius: 8px; padding: 5px 12px; cursor: pointer; font-size: 13px; backdrop-filter: blur(4px);
+  }
+  #btnPause:hover { background: var(--w-line); }
+
+  /* ===== 轨道区（透明，中央 highway） ===== */
+  #playfield { flex: 1 1 auto; position: relative; overflow: hidden; }
+  #lanes {
+    position: absolute; top: 0; bottom: 0;
+    left: 50%; transform: translateX(-50%);
+    width: calc(var(--lane-w) * 6);
+    background: var(--w-ghost);
+    border-left: 1px solid var(--w-hair);
+    border-right: 1px solid var(--w-hair);
+  }
+  /* 六条轨道背景：极淡竖线。
+     v2.15：每条带 data-track="0..5"，反馈层按轨道号精确定位，不再靠 DOM 顺序猜。 */
+  .lane-bg {
+    position: absolute; top: 0; bottom: 0;
+    width: var(--lane-w);
+    border-left: 1px solid var(--w-hair);
+    /* 反馈只动 background / box-shadow：两者都不参与布局，命中瞬间不会引发重排 */
+    transition: background 90ms linear, box-shadow 90ms linear;
+  }
+  .lane-bg:nth-child(1) { left: calc(var(--lane-w) * 0); }
+  .lane-bg:nth-child(2) { left: calc(var(--lane-w) * 1); }
+  .lane-bg:nth-child(3) { left: calc(var(--lane-w) * 2); }
+  .lane-bg:nth-child(4) { left: calc(var(--lane-w) * 3); }
+  .lane-bg:nth-child(5) { left: calc(var(--lane-w) * 4); }
+  .lane-bg:nth-child(6) { left: calc(var(--lane-w) * 5); border-right: 1px solid var(--w-hair); }
+  .lane-bg:nth-child(even) { background: var(--w-ghost); }
+  /* ① 按住中（.active）：整列自下而上亮起，一直持续到松手 ——
+     把"我按的是这一列"直接画给眼睛。原来只有底部受体圆点变大，
+     手指/视线在轨道上找不到回执。 */
+  .lane-bg.active {
+    background: linear-gradient(180deg,
+      rgba(255,255,255,0) 0%,
+      var(--w-hair) 45%,
+      var(--w-faint) 78%,
+      var(--w-mid) 100%);
+    box-shadow: inset 0 -34px 30px -14px var(--w-strong);
+  }
+  .lane-bg.active:nth-child(even) {
+    background: linear-gradient(180deg,
+      rgba(255,255,255,0) 0%,
+      var(--w-hair) 45%,
+      var(--w-faint) 78%,
+      var(--w-mid) 100%);
+  }
+  /* ② 命中瞬间（.hit）：列底一次短促爆闪，**最后一段直接铺成该判定等级的颜色**
+     （--hit-col 由 JS 按 PERFECT/GREAT/GOOD/MISS 写进来）。
+     为什么要把颜色放在最底那一小段而不是整列：在明亮背景图上，整列淡色 tint 会被
+     冲得只剩"白了一点"，看不出是哪个等级；压到判定线附近的一条饱和色边，
+     玩家的余光就能分辨"这一个是金还是红"。与 .active 是两层独立反馈：
+     .hit 只亮 IMPACT_MS(120ms)，.active 一直亮到松手。
+     注意下面必须再写一条 :nth-child(even) —— ".lane-bg.active:nth-child(even)"
+     的权重是 0,3,0，会盖掉权重 0,2,0 的 ".lane-bg.hit"，偶数列的爆闪就看不见了。 */
+  .lane-bg.hit {
+    background: linear-gradient(180deg,
+      rgba(255,255,255,0) 34%,
+      var(--w-faint) 80%,
+      var(--w-line) 94%,
+      var(--hit-col, #ffffff) 100%);
+    box-shadow: inset 0 -40px 36px -14px var(--hit-col, #ffffff);
+  }
+  .lane-bg.hit:nth-child(even) {
+    background: linear-gradient(180deg,
+      rgba(255,255,255,0) 34%,
+      var(--w-faint) 80%,
+      var(--w-mid) 94%,
+      var(--hit-col, #ffffff) 100%);
+    box-shadow: inset 0 -40px 36px -14px var(--hit-col, #ffffff);
+  }
+
+  /* ===== 判定区：横线 + 白色小圆受体 ===== */
+  /* v2.15：原来的 #judgeZone{display:none} + 空 div 已删 —— 没有任何代码引用它，
+     判定区实际由 #judgeLine 与 #keypads 承担。 */
+  #judgeLine {
+    position: absolute; left: 0; right: 0; bottom: var(--judge-y);
+    height: 2px; background: var(--w-soft);
+    box-shadow: 0 0 12px var(--w-mid);
+    z-index: 3;
+    /* 命中/漏击时整条线的亮灭（v2.15）：只动 background/box-shadow，不动几何。
+       background 用 45ms 快亮（"啪"的一下），box-shadow 用 200ms 慢收（余光）。
+       反过来（都 120ms+）会让判定线像是"缓缓亮起"，完全没有打击味。 */
+    transition: box-shadow 200ms linear, background 45ms linear;
+  }
+  #judgeLine.pulse {
+    background: #fff;
+    box-shadow: 0 0 18px var(--w-strong), 0 0 34px var(--lane2);
+  }
+  #judgeLine.missline {
+    background: var(--miss);
+    box-shadow: 0 0 16px rgba(239,154,154,0.95);
+  }
+  #noteLayer { position: absolute; inset: 0; z-index: 2; }
+  #fxLayer   { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+
+  /* ===== 音符（梦幻星形圆点 + 渐变长条） ===== */
+  /* 定位统一走【独立属性 translate】，动画统一走【transform】。
+     不能反过来（v2.13 修复）：复合变换顺序是 translate → rotate → scale → transform，
+     越靠右越"内层"。若用 transform:translateY 定位、用 scale 做动画，
+     定位位移会被一起缩放 —— scale 0.58 时 y=400 的音符会瞬间向上跳 168px。 */
+  .note { position: absolute; left: 0; top: 0; will-change: translate, transform; }
+  .tap {
+    border-radius: 50%;
+    background: var(--tap-image) center/contain no-repeat;
+    transform-origin: 50% 50%;                 /* 圆心缩小，位置不动 */
+  }
+  .hold {
+    border-radius: 999px;
+    overflow: hidden;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    /* 锚点要钉在"头"的圆心上，而不是元素底边：
+       动画里长条要往下收进头部、且头本身一寸都不许挪。
+       第一行是兜底（--hd 缺失时 calc 整条声明会失效）；
+       第二行用 --hd（长按头直径，spawnNotes 时注入）算出头心位置。
+       若用默认 50% 50%，长条中段会带着头向上跳 height/2（最长可达上百 px）。 */
+    transform-origin: 50% 100%;
+    transform-origin: 50% calc(100% - var(--hd, 0px) / 2);
+  }
+  /* 长按拖尾：严格采用 Trailing.png，仅做 100% 100% 拉伸/收缩（不重复/不裁剪），60% 半透明。
+     top/bottom = --hd（head 直径 = 容器宽），让 body 仅占 head/tail 圆之间的中段。 */
+  .hold .body {
+    position: absolute; left: 0; right: 0;
+    top: var(--hd); bottom: var(--hd);
+    background: var(--trail-image) center / 100% 100% no-repeat;
+    opacity: 0.6;
+    transition: opacity 120ms linear;
+  }
+  /* v2.15：长按"咬住"回执。.holding 由 JS 在按下瞬间加上、结算时移除，
+     此前这个类在 JS 里加了删了却没有任何规则命中（死类）。
+     这里只改 --trail-image 自身的不透明度：不换图、不叠滤镜/渐变/覆盖层，
+     完全符合"拖尾只能用 Trailing.png、只允许拉伸/收缩"的项目约定。 */
+  .hold.holding .body { opacity: 0.86; }
+  .hold .head, .hold .tail {
+    position: absolute; left: 0; width: 100%; aspect-ratio: 1 / 1;
+    border-radius: 50%;
+    background: var(--head-image) center/contain no-repeat;
+  }
+  .hold .head { bottom: 0; }
+  .hold .tail { top: 0; }
+
+  /* 命中 / 错过动画（v2.13：动 transform 而不是 scale/translate ——
+     这两个独立属性里 translate 已被定位占用，scale 会缩放定位位移，故全部改用 transform。
+     两条 keyframes 的函数列表保持一致，避免走矩阵分解插值导致中途抖动。 */
+  .note.hit  { animation: noteShatter 170ms cubic-bezier(.3,0,.7,1) forwards; }
+  .note.miss { animation: noteShatterMiss 220ms cubic-bezier(.3,0,.7,1) forwards; }
+  @keyframes noteShatter {
+    0%   { transform: scale(1);    opacity: 1; }
+    16%  { transform: scale(1.14); opacity: .92; }
+    100% { transform: scale(.58);  opacity: 0; }
+  }
+  @keyframes noteShatterMiss {
+    0%   { transform: translate(0, 0)    scale(1);   opacity: 1; }
+    100% { transform: translate(0, 14px) scale(.66); opacity: 0; }
+  }
+  /* 打碎粉末（v2.12）：粒子按 360° 均匀角度 + 分层半径向外**各向同性**扩散
+     （不再有上抛偏置 / 纵向压缩，否则看起来像整体往上飘）。
+     transform 只负责把粒子居中；位移/缩放走独立属性 translate/scale，
+     避免覆盖 transform（同 v1.1 结算动画的教训）。 */
+  .powder { position: absolute; inset: 0; pointer-events: none; }
+  .powder i {
+    position: absolute;
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+    will-change: translate, scale, opacity;
+    animation: powderFly 560ms cubic-bezier(.12,.72,.28,1) forwards;
+  }
+  @keyframes powderFly {
+    0%   { translate: 0 0;                 scale: 1;         opacity: 1; }
+    70%  {                                 scale: .76;       opacity: .8; }
+    100% { translate: var(--dx) var(--dy); scale: var(--sc); opacity: 0; }
+  }
+  .hitfx { position: absolute; width: 0; height: 0; }
+  .hitfx .ring {
+    position: absolute; left: 0; bottom: calc(var(--judge-y) + 8px);
+    width: 34px; height: 34px; margin: -17px 0 0 -17px;
+    border: 2px solid var(--w-strong); border-radius: 50%;
+    animation: ringPop 300ms ease-out forwards;
+  }
+  @keyframes ringPop { to { transform: scale(2.6); opacity: 0; } }
+
+  /* ===== 判定文字 / 连击 ===== */
+  #judgeText {
+    position: absolute; left: 0; right: 0; bottom: calc(var(--judge-y) + 46px);
+    text-align: center; font-size: 26px; font-weight: 800;
+    letter-spacing: 2px; z-index: 5; pointer-events: none;
+    opacity: 0; text-shadow: 0 2px 14px rgba(0,0,0,0.55);
+  }
+  #judgeText.show { animation: jpop 380ms ease-out; }
+  @keyframes jpop {
+    0%   { opacity: 1; transform: scale(1.2); }
+    30%  { opacity: 1; transform: scale(1); }
+    100% { opacity: 0; transform: scale(0.95); }
+  }
+  #combo {
+    position: absolute; top: 70px; left: 0; right: 0;
+    text-align: center; z-index: 5; pointer-events: none; display: none;
+  }
+  #combo .num { font-size: 44px; font-weight: 800; color: #fff; text-shadow: 0 2px 14px rgba(0,0,0,0.45); font-variant-numeric: tabular-nums; }
+  #combo .lab { font-size: 11px; letter-spacing: 6px; color: var(--w-strong); }
+  #combo.pop .num { animation: cpop 150ms ease-out; }
+  @keyframes cpop { 0% { transform: scale(1.18); } 100% { transform: scale(1); } }
+  /* 连击里程碑（每 50 连一次，见 updateCombo）：数字染金并多弹一档，
+     给"手正热着"一个明确回执。只动 color/text-shadow/transform —— 不引发重排。 */
+  #combo.milestone .num {
+    color: var(--lane2);
+    text-shadow: 0 0 26px rgba(255,224,130,0.8), 0 2px 14px rgba(0,0,0,0.45);
+  }
+  #combo.milestone.pop .num { animation: cpopBig 260ms cubic-bezier(.2,1.4,.4,1); }
+  @keyframes cpopBig { 0% { transform: scale(1.42); } 100% { transform: scale(1); } }
+
+  /* ===== 受体区（底部横线 + 白点，兼作触控区） ===== */
+  #keypads {
+    position: absolute; bottom: calc(var(--judge-y) - 1px); left: 0; right: 0;
+    height: 0; z-index: 5;
+    display: flex; justify-content: center;
+    pointer-events: none;
+  }
+  #keypads .pad-wrap {
+    width: calc(var(--lane-w) * 6); display: flex; position: relative;
+    pointer-events: auto;
+  }
+  /* v2.15：这里原本还有一条 #keypads .pad-wrap::before 画的 2px 白线，
+     但 #judgeLine（bottom: var(--judge-y)）与它只差 1px、两者叠成约 3px 的白带 ——
+     同一条视觉线由两处维护，而命中闪光只落在 #judgeLine 上，看起来像"闪一半"。
+     已删掉 ::before，判定线只由 #judgeLine 一处负责。 */
+  .key {
+    flex: 1; height: 54px; margin-top: -9px;
+    display: flex; align-items: flex-start; justify-content: center;
+    background: transparent; border: none;
+    cursor: pointer; touch-action: none;
+  }
+  .key::after {
+    content: ''; width: 14px; height: 14px; border-radius: 50%;
+    /* 按键圆点：颜色来自当前皮肤（applySkin 写入 --key-col，
+       值取自 role/palette.js 构建期抽出的 key 主色） */
+    background: var(--key-col);
+    box-shadow: 0 0 10px var(--key-col);
+    transition: transform 80ms, background 80ms, box-shadow 80ms;
+  }
+  .key.active::after {
+    background: #fff;
+    transform: scale(1.35);
+    box-shadow: 0 0 20px var(--w-strong), 0 0 8px var(--lane2);
+  }
+  .key .label { display: none; }
+
+  /* ===== 覆盖层（开始 / 倒计时 / 暂停 / 结算） ===== */
+  .overlay {
+    position: absolute; inset: 0; z-index: 10;
+    display: none; flex-direction: column; align-items: center; justify-content: center;
+    /* v1.9 去掉 backdrop-filter: blur(12px)：开始界面关闭时移除该滤镜会触发一次
+       全屏重合成，正好撞在倒计时结束、首个音符到线的时刻造成卡顿/瞬移 */
+    background: rgba(8,11,20,0.78);
+    text-align: center; padding: 24px;
+    /* 视口矮的时候（结算内容约 400px 高）按钮会被挤出可视区、玩家点不到 →
+       允许滚动，保证"退出"入口永远够得着 */
+    overflow-y: auto;
+  }
+  .overlay.show { display: flex; }
+  /* v2.15：justify-content:center 在"内容比视口高"时会把顶部那段推出可视区，
+     而且往上滚不到（flex 居中溢出是经典坑：矮屏结算页的评级/分数会看不见）。
+     改为给首尾子元素 auto 外边距：不溢出时等价居中，溢出时可完整滚动。 */
+  .overlay > :first-child { margin-top: auto; }
+  .overlay > :last-child  { margin-bottom: auto; }
+  .overlay h2 { font-size: 30px; margin-bottom: 10px; font-weight: 700; text-shadow: 0 2px 14px rgba(0,0,0,0.45); }
+  .overlay .sub { color: var(--w-strong); font-size: 14px; line-height: 1.8; }
+  /* v2.15：这两处原本用内联 style 写 margin/字号，收成语义类 ——
+     排版规则回到样式表里，改版式不用进 markup 翻内联。 */
+  .sub.tight { margin-top: 10px; }
+  .sub.hint  { margin-top: 12px; font-size: 12px; opacity: .75; }
+  .btnrow { display: flex; gap: 14px; margin-top: 26px; flex-wrap: wrap; justify-content: center; }
+  .btn {
+    background: linear-gradient(180deg, var(--w-line), var(--w-hair));
+    color: #fff; border: 1px solid var(--w-mid); border-radius: 999px;
+    padding: 11px 30px; font-size: 15px; font-weight: 700; cursor: pointer;
+    backdrop-filter: blur(4px); box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+  }
+  .btn:hover { filter: brightness(1.15); }
+  .btn.ghost { background: var(--w-hair); }
+  #speedRow { margin-top: 18px; }
+  #speedRow button {
+    background: var(--w-hair); color: #fff; border: 1px solid var(--w-line);
+    border-radius: 999px; padding: 8px 18px; margin: 0 4px; cursor: pointer; font-weight: 600;
+  }
+  #speedRow button.sel { background: var(--w-mid); border-color: var(--w-soft); }
+  #countdown {
+    position: absolute; inset: 0; z-index: 9;
+    display: none; align-items: center; justify-content: center;
+    font-size: 110px; font-weight: 800; color: #fff;
+    text-shadow: 0 4px 30px rgba(0,0,0,0.45); pointer-events: none;
+  }
+  #countdown.show { display: flex; }
+
+  /* 结算 */
+  #result .rank { font-size: 92px; font-weight: 800; line-height: 1; margin-bottom: 4px; color: #fff; text-shadow: 0 2px 20px rgba(0,0,0,0.4); }
+  #result .score { font-size: 34px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; text-shadow: 0 2px 10px rgba(0,0,0,0.35); }
+  #result .newbest { color: var(--lane2); font-size: 14px; margin-top: 6px; height: 20px; }
+  /* 结算数据表：两列都用 max-content，数值列靠 justify-self: end 对齐。
+     原来靠 b{min-width:60px; text-align:right} 兜 —— 列宽被 min-width 撑成固定值，
+     数值位数变化时两列间距会跟着动；现在列宽由内容自然决定、对齐是显式约束。 */
+  .stats { display: grid; grid-template-columns: max-content max-content; gap: 6px 28px; margin-top: 18px; font-size: 14px; }
+  .stats b { display: block; justify-self: end; font-variant-numeric: tabular-nums; }
+  .stats span { color: var(--w-soft); }
+  .g-perfect { color: var(--perfect); } .g-great { color: var(--great); }
+  .g-good { color: var(--good); } .g-miss { color: var(--miss); }
+
+  /* ===== 右上角 / 左下角 / 右下角 界面元素 ===== */
+  #btnClose {
+    position: absolute; top: 12px; right: 16px; z-index: 6;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: var(--w-faint); border: 1px solid var(--w-mid);
+    color: #fff; font-size: 22px; line-height: 1; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    backdrop-filter: blur(4px);
+  }
+  #btnClose:hover { background: var(--w-line); }
+  /* ===== 右侧皮肤栏（v2.14）：role/skins.js 里有几套皮肤就一一列出几个 =====
+     缩略图取该皮肤的背景图（缺背景时构建期已退到短按图）；点一下整页换肤，
+     背景 + 短按图 + 长按头尾图 + 拖尾图 + 粉末配色一次换齐。 */
+  #skinBar {
+    position: absolute; top: 58px; right: 16px; z-index: 6;
+    width: 104px; max-height: calc(100vh - 190px);
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 8px 7px;
+    background: rgba(10,14,26,0.42); border: 1px solid var(--w-line);
+    border-radius: 12px; backdrop-filter: blur(6px);
+    overflow-y: auto;
+  }
+  #skinBar .cap {
+    font-size: 10px; letter-spacing: 0.14em; text-align: center;
+    color: var(--w-soft);
+  }
+  #skinBar .list { display: flex; flex-direction: column; gap: 6px; }
+  #skinBar .skin {
+    display: flex; flex-direction: column; gap: 4px; cursor: pointer;
+    padding: 4px; border-radius: 9px; font: inherit; color: inherit; text-align: center;
+    background: var(--w-hair); border: 1px solid transparent;
+  }
+  #skinBar .skin:hover { background: var(--w-line); }
+  #skinBar .skin:focus-visible { outline: 2px solid var(--lane2); outline-offset: 1px; }
+  #skinBar .skin.on { border-color: var(--lane2); background: rgba(255,224,130,0.14); }
+  #skinBar .skin .th {
+    display: block; width: 100%; aspect-ratio: 16 / 10; border-radius: 6px;
+    background-size: cover; background-position: center; background-repeat: no-repeat;
+    opacity: 0.85;
+  }
+  #skinBar .skin.on .th { opacity: 1; }
+  #skinBar .skin .nm {
+    font-size: 10px; line-height: 1.3; color: var(--w-strong);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  #skinBar .skin.on .nm { color: #fff; font-weight: 700; }
+  #skinBar .tip { font-size: 9px; line-height: 1.45; color: var(--w-soft); text-align: center; }
+  #bottomLeft {
+    position: absolute; bottom: 18px; left: 18px; z-index: 6;
+    display: flex; align-items: center; gap: 12px;
+  }
+  #bottomLeft .modebox, #bottomLeft .setting {
+    display: flex; align-items: center; gap: 6px;
+    padding: 7px 13px; border-radius: 999px;
+    background: var(--w-faint); border: 1px solid var(--w-line);
+    color: var(--w-strong); font-size: 13px; backdrop-filter: blur(4px);
+  }
+  #bottomRight {
+    position: absolute; bottom: 18px; right: 18px; z-index: 6;
+    text-align: right;
+    padding: 8px 14px; border-radius: 10px;
+    background: var(--w-hair); border: 1px solid var(--w-faint);
+    backdrop-filter: blur(4px);
+  }
+  #bottomRight .role { font-size: 13px; color: var(--w-strong); font-weight: 600; }
+  #bottomRight .song { font-size: 16px; font-weight: 700; color: #fff; }
+  #bottomRight .status { font-size: 11px; color: var(--w-soft); margin-top: 2px; }
+
+  /* ===== 响应式（v2.15 收敛为一区） =====
+     此前断点散落在三处、两套并行：--lane-w 用 1920/900/620/480，
+     #skinBar 用 780，顶栏用 560；而且 480 与 560 都把 --lane-w 设成 15vw
+     （同值、后写的 560 永远胜出）→ 480 那条是彻底的死规则，已删。
+     现在从宽到窄集中在这里，值与原实现逐一对应，画面零变化。
+     注意：--lane-w 一律用纯媒体查询，不用 clamp/min() —— 某些运行环境
+     对 clamp 解析异常会让轨道宽度坍塌为 0（v1.3 的教训）。 */
+  @media (min-width: 1920px) { :root { --lane-w: 132px; } }
+  @media (max-width: 900px)  { :root { --lane-w: 96px; } }
+  /* 780：皮肤栏收成只剩缩略图（别挡住居中的六条轨道） */
+  @media (max-width: 780px) {
+    #skinBar { width: 60px; padding: 6px 5px; }
+    #skinBar .skin .nm { display: none; }
+    #skinBar .tip { display: none; }
+  }
+  @media (max-width: 620px)  { :root { --lane-w: 78px; } }
+  /* 560：顶栏收紧，轨道改按视口百分比（原 480 那条同值，属于重复规则） */
+  @media (max-width: 560px) {
+    :root { --lane-w: 15vw; }
+    header { gap: 8px; padding: 0 8px; }
+    header .title small { display: none; }
+    #hudScore { font-size: 16px; }
+    #hudAcc { top: 34px; font-size: 10px; }
+    #vol { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="bgLayer"></div>
+<div id="bgVignette"></div>
+<div id="app">
+  <header>
+    <span class="title" id="hudTitle">音游</span>
+    <span id="verTag">v2.15.1</span>
+    <span id="hudScore">0</span>
+    <!-- v2.15：准确率实时回执。此前只有 #hudAcc 的样式与 JS 写入，markup 里没有这个元素
+         （JS 靠 if (hudAcc) 空守卫兜着，所以从来没报错、也从来没显示过）。 -->
+    <span id="hudAcc">100.00%</span>
+    <span class="spacer"></span>
+    <input type="range" id="vol" min="0" max="100" value="50" title="音量" />
+    <button id="btnPause">暂停</button>
+  </header>
+  <div id="progressWrap"><div id="progressBar"></div></div>
+
+  <!-- 右上角小控件 -->
+  <button id="btnClose" onclick="back()" title="返回">×</button>
+
+  <!-- 右侧皮肤栏：role/skins.js 的清单里有多少套皮肤就一一列出多少个（v2.14） -->
+  <div id="skinBar">
+    <div class="cap">皮 肤</div>
+    <div class="list" id="skinList"></div>
+  </div>
+
+  <!-- 左下角 / 右下角信息 -->
+  <div id="bottomLeft">
+    <div class="modebox">
+      <span>垂直模式</span>
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M7 10l5 5 5-5z"/></svg>
+    </div>
+    <div class="setting"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84a.484.484 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.488.488 0 0 0-.59.22L2.74 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.27.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg> <span>详细设置</span></div>
+  </div>
+  <div id="bottomRight">
+    <div class="role" id="brRole">芙宁娜</div>
+    <div class="song" id="brSong">轻漾涟漪</div>
+    <div class="status">使用中</div>
+  </div>
+
+  <div id="playfield">
+    <!-- v2.15 环境律动层：压在轨道之下（z-index:0 且排在 #lanes 之前），只改 opacity -->
+    <div id="beatGlow"></div>
+    <div id="lanes">
+      <div class="lane-bg" data-track="0"></div><div class="lane-bg" data-track="1"></div><div class="lane-bg" data-track="2"></div>
+      <div class="lane-bg" data-track="3"></div><div class="lane-bg" data-track="4"></div><div class="lane-bg" data-track="5"></div>
+      <div id="judgeLine"></div>
+      <div id="noteLayer"></div>
+      <div id="fxLayer"></div>
+    </div>
+    <div id="judgeText"></div>
+    <div id="combo"><div class="num">0</div><div class="lab">COMBO</div></div>
+    <div id="countdown"></div>
+  </div>
+
+  <div id="keypads"><div class="pad-wrap">
+    <div class="key" data-track="0">S</div><div class="key" data-track="1">D</div>
+    <div class="key" data-track="2">F</div><div class="key" data-track="3">J</div>
+    <div class="key" data-track="4">K</div><div class="key" data-track="5">L</div>
+  </div></div>
+
+  <!-- 开始界面 -->
+  <div class="overlay show" id="start">
+    <h2 id="startTitle">轻涟</h2>
+    <div class="sub" id="startInfo">载入中…</div>
+    <div class="sub tight">键位：S D F J K L　|　圆形音符=短按　长条=按住到结尾</div>
+    <div class="speedrow" id="speedRow">
+      <button data-sp="3000">慢速</button>
+      <button data-sp="2100" class="sel">标准</button>
+      <button data-sp="1350">快速</button>
+    </div>
+    <div class="sub">下落速度（音符从出现到判定线的时间）</div>
+    <div class="btnrow"><button class="btn" id="btnStart">开 始（3 秒后歌曲响起）</button></div>
+  </div>
+
+  <!-- 暂停 -->
+  <div class="overlay" id="pause">
+    <h2>已暂停</h2>
+    <div class="sub">歌曲与判定同步冻结</div>
+    <div class="btnrow">
+      <button class="btn" id="btnResume">继续</button>
+      <button class="btn ghost" id="btnRestart">重新开始</button>
+      <button class="btn ghost" id="btnQuit">返回选择</button>
+    </div>
+  </div>
+
+  <!-- 结算 -->
+  <div class="overlay" id="result">
+    <div class="rank" id="resRank">S</div>
+    <div class="score" id="resScore">0</div>
+    <div class="newbest" id="resBest"></div>
+    <div class="stats">
+      <b class="g-perfect" id="stP">0</b><span>PERFECT</span>
+      <b class="g-great"   id="stG">0</b><span>GREAT</span>
+      <b class="g-good"    id="stO">0</b><span>GOOD</span>
+      <b class="g-miss"    id="stM">0</b><span>MISS</span>
+      <b id="stCombo">0</b><span>最大连击</span>
+    </div>
+    <div class="btnrow">
+      <button class="btn" id="btnRetry">再来一次</button>
+      <button class="btn ghost" id="btnQuit2">返回选择</button>
+    </div>
+    <div class="sub hint">
+      键盘：Esc 返回选择 · Enter / 空格 再来一次
+    </div>
+  </div>
+</div>
+
+<audio id="bgm" preload="auto"></audio>
+<script src="chart.js"></script>
+<script src="music/charts.js"></script>
+<script src="role/skins.js"></script>
+<script src="role/palette.js"></script>
+<script>
+/**
+ * ============================================================
+ * 音游播放页（六键位下落式）v2.15
+ *  - 曲谱由 music/charts.js 提供（gen_songs.js 扫描 music/<id>/ 打包谱面原文），
+ *    运行时用 chart.js parseChart 解析 → { t(ms), track 0-5, type 1短按|2长按, end }；
+ *    音频 <audio src> 直接加载（file:// 与 http:// 均可用）。无需预编译 notes；
+ *    新增曲目只需在 music/ 下加子文件夹并 node gen_songs.js。
+ *  - 歌曲播放前留 3 秒准备（倒计时 3-2-1），歌曲出现声音的时刻 = 0ms
+ *  - v1.7/v1.8 修复"倒计时结束首个音符瞬移到判定线下方被 MISS"——双引擎计时：
+ *    · Web Audio 引擎（默认，http 环境自动启用）：fetch 音频 →
+ *      decodeAudioData → BufferSource 采样级调度 start(上下文时间+LEAD_IN)。
+ *      时钟 = actx.currentTime - startAt，从 -3000 连续平滑推进到 0，
+ *      出声瞬间恰好 0ms——无冻结、无跳变，首个音符随歌声滑入判定线。
+ *      暂停/继续 = suspend/resume（上下文时钟同步冻结，天然对齐）。
+ *    · audio 元素引擎（file:// 等 fetch 不可用时的回退；URL 加
+ *      ?engine=element 可强制指定）：START_HOLD 冻结方案；v1.8 把锚点
+ *      从 audio.currentTime 改为常量 0（避免卡顿导致 playing 回调延迟时
+ *      currentTime 已 >0 而把首音符锚到判定线下方），并加 800ms 宽限期
+ *      抑制硬同步，去掉静音预热以消除竞态。
+ *  - v2.11 长按尾判定独立评分 + 音符"打碎为粉末"扩散消失：
+ *    · 尾判定不再沿用头部评级。松手时刻与 E 的偏差 dt = t - n.end：
+ *      |dt| ≤ 80 → PERFECT，≤ 140 → GREAT，≤ 220(RELEASE) → GOOD，
+ *      再远（过早松手）→ MISS。长按最终评级 = 头部判定与尾部判定中更差者。
+ *      按住到 n.end + RELEASE 仍未松手 → autoResolve 以 GOOD 保底结算。
+ *    · resolveNote 先取音符当前位置矩形，本体播放"炸开→崩解"动画
+ *      (noteShatter / noteShatterMiss)，同时 shatterFx 在 fxLayer 撒
+ *      12~16 颗粒子（命中亮色 / MISS 灰蓝）向外扩散 + 收缩淡出。
+ *  - v2.12 粉末"向四周均匀扩散" + 长按不再滞留 + 长按实时加分：
+ *    · 扩散形态修正：v2.11 的角度随机 + --dy 乘 0.8 再减 16（向上偏置）会
+ *      看起来"淡化向上飘"。现改为角度按 i/count 均分整个圆周（只加半个
+ *      扇区的抖动）→ 每个方向都有粒子；径向距离分三层（0.42/0.72/1.0 ×
+ *      reach）制造厚度；--dx/--dy 完全对称、零偏置；本体 noteShatter 由
+ *      240ms 缩到 170ms 并只缩到 .58，把视觉焦点让给四散的粉末。
+ *    · 长按视觉：过 E 后不再把整条钉在判定线上，renderNotes 加 over =
+ *      (t-end)*pxPerMs，判定线以下的残留段继续按原速度向下滑走；
+ *      同时 autoResolve 在 t ≥ end + RELEASE 时立刻结算（GOOD 保底），
+ *      所以最多下滑 220ms 就消失，不会长时间滞留在轨道尽头。
+ *    · 长按实时加分：laneDown 记录 maxAward = 头部权重、awarded = 0，
+ *      每帧 tickHold() 按 prog = (t-n.t)/(n.end-n.t) 发放 prog*maxAward，
+ *      分数随按住进度实时上涨（只增不减）；resolveNote 只补差额
+ *      （尾判定比头差就扣回 / 更好就补足）。S.liveAward 记录"已发放但
+ *      尚未结算"的部分，HUD 准确率用 (sumWeight - liveAward)/done 计算，
+ *      否则按住瞬间 acc 会虚高甚至 >100%。finish() 会先结算残留长按并把
+ *      liveAward 归零，保证结算页数字准确。
+ *  - v2.13 修"命中瞬间音符快速上移" + 粉末配色取自音符图片：
+ *    · 根因（CSS 复合变换顺序）：矩阵是 translate → rotate → scale → transform，
+ *      越靠右越内层。v2.12 用 **transform:translateY(y)** 做纵向定位、却用
+ *      **scale** 做命中动画，于是定位位移被一起缩放：实测 scale 0.58 / y=400
+ *      时音符向上跳 146px（长按 99px），中途还会先向下 44px，观感就是"快速上移"。
+ *      修法：定位改用独立属性 **translate**，动画全部改用 **transform**，
+ *      两者彻底分层；再加 .hold{transform-origin:50% 100%}（长条向"头"收缩，
+ *      否则默认 50% 50% 会让长条中段带着头向上跳 height/2）。
+ *    · 粉末配色：新增 gen_palette.js，构建期用 Node（零依赖，仅 zlib 解 PNG + 反滤波）
+ *      从 role/<角色>/*.png 做 k-means 抽关键色 → 写 role/palette.js
+ *      （window.RHYTHM_ROLE_PALETTE）。短按粉末取 D.png 的色，长按取
+ *      R.png + Trailing.png 的色；MISS 沿用同色系去饱和版（"烧尽的灰"）。
+ *      颜色钳过亮度（近黑色粒子在深色轨道上看不见）。
+ *      运行时不能用 canvas 取样：file:// 下画布被污染，getImageData 抛 SecurityError。
+ *  - v2.14 皮肤栏（新增/更换皮肤不再需要改 HTML/CSS）：
+ *    · 构建期 gen_palette.js 扫描 role/ 下各皮肤文件夹，额外生成 role/skins.js（皮肤清单：
+ *      背景 + 短按图 + 长按头图 + 拖尾图 + 配色键 + 排序）。播放页右侧皮肤栏按这份
+ *      清单**一一列出**，点一下整套换肤。
+ *    · 四张图从写死的 url('role/<名>/...') 改为 CSS 变量
+ *      （--bg-image / --tap-image / --head-image / --trail-image），applySkin()
+ *      一次性全部改写 —— 不会再出现"背景换了、音符还是旧的"。
+ *    · 选择优先级：?skin=<id> > localStorage 记忆 > 清单默认（skins.js 的第一项）> 首项。
+ *      一律校验 id 在清单内，删掉某套皮肤后旧记录不会把页面弄空。
+ *    · 新增皮肤 = 在 role/ 下新建文件夹放 Background/D/R/Trailing.png，跑 node build.js。
+ *      少了哪张图都能降级工作：没 Background 就只有纯色底，没 D.png 借用 R.png，
+ *      拖尾严格只用 Trailing.png（项目约定：不可用别的图顶替）。
+ *  - v2.15 打击感 / 体验（全部只动 background / box-shadow / opacity / class，
+ *    判定瞬间绝不重排 —— 详见下方"打击感反馈层"的说明）：
+ *    · 按住整列亮起（.lane-bg.active）+ 命中列底爆闪（.lane-bg.hit，颜色随等级）：
+ *      原来是"只有底部圆点变大"，手指/视线在轨道上找不到回执。
+ *    · 判定线亮灭（#judgeLine.pulse / .missline）：命中白闪、漏击红闪。
+ *    · 环境律动 #beatGlow：节拍网格上的整场呼吸。密度 < 2.6 notes/s 或连击 < 12
+ *      不亮（稀疏段乱闪更吵、断连时画面自动安静下来）—— 门槛由纯函数 beatStrength 决定；
+ *      密度 > 3.5 之后由 beatDuck 反向压制（v2.15.2，密集段反而更安静）。
+ *    · 长按 .holding 拖尾提亮（此前是加了类却无规则命中的死类，只改同一张
+ *      Trailing.png 的不透明度，不换图不叠滤镜）。
+ *    · HUD 实时准确率 + FC/AP 徽章；连击每 50 一次里程碑；音量默认 50% 并可记忆。
+ *    · 清掉 #receptorLine 整块死 CSS（没有任何元素用的是这个 id）。
+ *  - v2.15.1 CSS 格式清理（观感与原实现逐一对应，除下面标注的几处）：
+ *    · 白色透明度收敛成 :root 的 7 档语义令牌（--w-ghost/hair/faint/line/mid/soft/strong），
+ *      原先 62 处 rgba(255,255,255,α)、31 种肉眼分不出的取值。取值取各簇众数，
+ *      视觉差异以 ≤0.05 为主（个别辉光/次要文字差 0.1 左右）。
+ *    · 响应式断点从三处两套收敛到文件末尾的「响应式」一区；删掉 480 那条
+ *      与 560 完全重复（同值 15vw）的死规则 → 画面零变化。
+ *    · 进度条从"每帧写 width"改成 transform: scaleX()（全程合成层，
+ *      不再每帧触发布局）；HUD 三个每帧写入的元素改为 init 时缓存。
+ *    · 判定线只由 #judgeLine 一处负责：删掉 #keypads .pad-wrap::before 那条
+ *      与它只差 1px 的重复白线（此前闪光只落在其中一条上）。
+ *    · 按键圆点颜色改由 --key-col 驱动，由 applySkin() 从 role/palette.js 的
+ *      key 字段写入 —— 该字段此前每套皮肤都生成，却从没被播放页消费过。
+ *    · 删掉无引用的空元素 #judgeZone；.stats 改 max-content + justify-self:end
+ *      （不再靠 b{min-width:60px} 兜对齐）；两处内联 style 收成语义类
+ *      （.sub.tight / .sub.hint）。
+ *  - v2.15.2 防频闪（"音符密集时画面过于闪"）：
+ *    · 根因一：律动网格写死 78ms（12.8 次/秒）。注释说"≈115 BPM 的八分音符"，
+ *      但 115 BPM 的八分音符是 261ms —— 78ms 快了 3.3 倍，正好落进
+ *      8~15 Hz 这个"人眼对亮度调制最敏感"的频段（闪烁融合临界区）。
+ *      现在改用 BEAT_BPM 推导（Math.round(60000/BPM/2) = 261ms，3.8 次/秒），
+ *      数值和注释再也不可能对不上。
+ *    · 根因二：BEAT_DECAY_MS 260ms > 网格 78ms → 下一格到来时上一脉冲还剩
+ *      (1-78/260)² ≈ 0.49 亮度，稳态亮度恒在 0.49~1.0 高位抖 → "心跳"变"嗡鸣"。
+ *      现在 decay=170 < grid=261（占空比 65%），每格末尾真正归零。
+ *    · 根因三：beatStrength 对密度单调**递增** —— 越密越亮，方向反了。
+ *      新增独立一层 beatDuck(nps)：密度过 3.5（= 满亮密度）后反向压制，
+ *      5.0 notes/s 处压到地板 0.20，使"环境亮度总量"不再随密度增长。
+ *      全曲峰值从 0.55 降到 0.32，最密处只剩 0.064（降 88%）。
+ *    · 次因：判定线 / 判定文字"重新起跳"节流（JUDGE_FLASH_MIN_GAP_MS，内容与
+ *      颜色仍每次都更新）；shatterFx 粒子数随密度砍到约一半；IMPACT_MS 150→120；
+ *      #beatGlow 加 contain。
+ *  - 纯函数挂 window.Rhythm 供 test_rhythm.html 做 TDD 断言
+ * ============================================================
+ */
+'use strict';
+
+/* ---------- 常量 ---------- */
+var LEAD_IN = 3000;                     // 开场准备毫秒数
+var RESUME_LEAD = 3000;                 // 暂停后"继续"的准备倒计时毫秒数
+                                        // 音频静音时长（SILENCE）不再硬编码：由谱面头 #SILENCE 提供，
+                                        // 经 chart.js parseChart 解析后传给 song.silence。
+var START_HOLD = 250;                   // 历史保留常量（v1.6 音频启动期冻结值）。
+                                        // v2.4 后移音乐后不再参与时钟计算（starting 冻结值
+                                        // = musicLeadMs），仅保留供 window.Rhythm 测试断言。
+var WINDOWS = { PERFECT: 80, GREAT: 140, GOOD: 200, RELEASE: 220 }; // 判定窗口（放宽）
+var KEYMAP  = { KeyS:0, KeyD:1, KeyF:2, KeyJ:3, KeyK:4, KeyL:5 };
+var LANE_COUNT = 6;
+var SPEEDS = [3000, 2100, 1350];        // 下落总时长（原速的 2/3 速度 = 时长×1.5）
+var RANKS = [ [990000,'SS'], [950000,'S'], [900000,'A'], [800000,'B'], [700000,'C'] ];
+var TAP_RATIO  = 0.80;                  // 短按圆直径 = 轨道宽 × 0.8
+var HOLD_RATIO = 0.80;                  // 长按头/尾圆直径 = 轨道宽 × 0.8（与短按 TAP_RATIO 一致，同大小）
+
+/* ---------- v2.15 打击感常量 ---------- */
+/* 环境律动的节拍网格。刻意不读谱面 BPM：这一层要的是"均匀的心跳"，
+   跟曲速解耦反而不会和音符的下落节奏打架。
+   v2.15.2 修正：这里原本写死 78ms，注释却说"≈115 BPM 的八分音符"——
+   115 BPM 的八分音符是 60000/115/2 ≈ 261ms，78ms 快了 3.3 倍（= 12.8 次/秒）。
+   而 8~15 Hz 正好是人眼对亮度调制最敏感的频段（闪烁融合临界区），
+   于是"心跳"直接变成了"频闪"。改成推导式，让数值与注释再也不可能对不上。 */
+var BEAT_BPM       = 115;                                  // 幻想的"心跳"速度（与曲速无关）
+var BEAT_GRID_MS   = Math.round(60000 / BEAT_BPM / 2);     // = 261ms（八分音符）→ 3.8 次/秒
+/* 一次律动从峰值衰减到 0 的时间。
+   v2.15.2 修正：原来是 260ms，比网格 78ms 长 3.3 倍 —— 下一格到来时上一脉冲
+   还剩 (1-78/260)² ≈ 0.49 的亮度，稳态下亮度永远在 0.49~1.0 之间抖，
+   "一次一次的心跳"变成了"一直亮着的嗡鸣"。
+   现在 decay(170) < grid(261)，占空比 65%：每个格子末尾真正归零再起下一次。
+   ⚠ 这个值是**按网格周期调的**，改 BEAT_BPM 必须回来重新核对（约束见测试 §5）。 */
+var BEAT_DECAY_MS  = 170;
+var BEAT_MIN_NPS   = 2.6;               // 音符密度低于此值不律动（稀疏段闪起来很吵）
+var BEAT_NPS_SPAN  = 0.9;               // 密度 2.6 → 3.5 notes/s 线性推到满亮
+var BEAT_MIN_COMBO = 12;                // 连击低于此值不律动（断连时画面自然"安静"下来）
+var BEAT_PEAK      = 0.32;              // 律动强度的视觉峰值（#beatGlow 的最大不透明度）
+                                        // v2.15.2：0.55 → 0.32。满亮会在底部糊成一团光，反而盖住音符
+/* v2.15.2 防频闪的核心一招：密度越高，律动越弱（详见 beatDuck）。
+   密集段本来就每秒十几个判定回执（列底爆闪 + 判定线 + 判定文字），
+   环境层再跟着加亮，等于在最亮的地方叠最亮的一层 —— 叠出来就是"一片闪"。
+   起压点写成推导式：**正好落在 beatStrength 的满亮密度上**。
+   这样整条曲线只有一个峰（那个密度处），两侧都单调下降，位置有定义、可断言；
+   若让压制早于满亮开始，强度还在爬、压制已经动手，峰值就会漂到没人能说清的地方。 */
+var BEAT_DUCK_NPS  = BEAT_MIN_NPS + BEAT_NPS_SPAN;   // = 3.5 notes/s（满亮密度）
+var BEAT_DUCK_SPAN = 1.5;               // 3.5 → 5.0 notes/s 线性压到地板
+var BEAT_DUCK_FLOOR= 0.20;              // 压制下限（再密也不全灭，保留"心跳"）
+var IMPACT_MS      = 120;               // 命中爆闪持续时间（配 .lane-bg 的 90ms 过渡）
+var JUDGE_FLASH_MS = 130;               // 判定线亮/灭时间
+/* v2.15.2：判定线与判定文字"重新起跳"的最小间隔。
+   密集段每秒十几次连跳，眼睛只会看到一团在抖的字、一根一直亮着的线。
+   内容与颜色仍然每次都更新（信息必达），只是不再每次都重新起跳。 */
+var JUDGE_FLASH_MIN_GAP_MS = 90;
+/* 判定等级 → 颜色。命中爆闪（--hit-col）、判定文字、结算配色共用这一份，
+   避免"同一个 PERFECT 在三个地方三种黄"。 */
+var GRADE_COLOR = { PERFECT: 'var(--perfect)', GREAT: 'var(--great)', GOOD: 'var(--good)', MISS: 'var(--miss)' };
+
+/* ---------- localStorage 安全包装（v2.13.1） ----------
+   为什么必须包：成绩读写绝不能决定"结算界面能不能出来"。
+   实测（.workbuddy/tests/_probe_finish.js 的 E 组）：只要 setItem 抛
+   QuotaExceededError —— 配额满 / 隐私模式 / 站点数据被策略拦截 / 部分环境下
+   file:// 只读 —— 未加保护的 finish() 会在写成绩那一行中断，
+   于是结算层永远不显示，歌曲播完后玩家卡在轨道上，表现为"无法正常退出"。
+   同类风险还有 init() 里的读：一旦抛错，整个 init 中断 → 按钮监听全部没挂上。
+   所以读写一律降级：拿不到就按"没有记录/没有偏好"处理，游戏流程照常。 */
+var LS = (function () {
+  function get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function set(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+  var ok = (function () {
+    try {
+      localStorage.setItem('__rhythm_ls_probe__', '1');
+      localStorage.removeItem('__rhythm_ls_probe__');
+      return true;
+    } catch (e) { return false; }
+  }());
+  return { get: get, set: set, ok: ok };
+})();
+
+/* ---------- 纯函数（TDD 暴露） ---------- */
+/* 评级序（越小越差）与权重。长按最终评级取头/尾两次判定中更差者。 */
+var GRADE_ORDER  = { MISS: 0, GOOD: 1, GREAT: 2, PERFECT: 3 };
+var GRADE_WEIGHT = { PERFECT: 1.0, GREAT: 0.7, GOOD: 0.4, MISS: 0 };
+
+function judgeTap(dt) {
+  var a = Math.abs(dt);
+  if (a <= WINDOWS.PERFECT) return { grade: 'PERFECT', weight: 1.0 };
+  if (a <= WINDOWS.GREAT)   return { grade: 'GREAT',   weight: 0.7 };
+  if (a <= WINDOWS.GOOD)    return { grade: 'GOOD',    weight: 0.4 };
+  return null;
+}
+/**
+ * 长按尾判定（v2.11）：按"松手时刻与 E 的偏差"独立评分，不再沿用头部判定。
+ *   dt = 松手时刻 - n.end   （负 = 早松，正 = 晚松）
+ *   |dt| ≤ PERFECT(80)  → PERFECT
+ *   |dt| ≤ GREAT(140)   → GREAT
+ *   |dt| ≤ RELEASE(220) → GOOD
+ *   否则 null（= MISS：过早松手）
+ * 一直按住不松手的情况由 autoResolve 在 n.end + RELEASE 处以 GOOD 保底结算。
+ */
+function judgeRelease(dt) {
+  var a = Math.abs(dt);
+  if (a <= WINDOWS.PERFECT) return { grade: 'PERFECT', weight: 1.0 };
+  if (a <= WINDOWS.GREAT)   return { grade: 'GREAT',   weight: 0.7 };
+  if (a <= WINDOWS.RELEASE) return { grade: 'GOOD',    weight: 0.4 };
+  return null;
+}
+/** 取两个评级中更差的那个（长按头尾两次判定都不能拖后腿） */
+function worseGrade(a, b) {
+  var oa = GRADE_ORDER[a] == null ? 0 : GRADE_ORDER[a];
+  var ob = GRADE_ORDER[b] == null ? 0 : GRADE_ORDER[b];
+  return oa <= ob ? a : b;
+}
+function gradeRank(score) {
+  for (var i = 0; i < RANKS.length; i++) if (score >= RANKS[i][0]) return RANKS[i][1];
+  return 'D';
+}
+/** 校验音符数据合法性（结构不变量） */
+function validateNotes(notes) {
+  if (!Array.isArray(notes) || notes.length === 0) return 'notes 为空';
+  var prev = -Infinity;
+  for (var i = 0; i < notes.length; i++) {
+    var n = notes[i];
+    if (n.track < 0 || n.track >= LANE_COUNT) return 'track 越界 @' + n.t;
+    if (n.t < prev) return '时间未升序 @' + n.t;
+    prev = n.t;
+    if (n.type === 2) {
+      if (typeof n.end !== 'number' || n.end <= n.t) return '长按 end 非法 @' + n.t;
+    } else if (n.type !== 1) return '未知 type @' + n.t;
+  }
+  return null;
+}
+
+/**
+ * 音乐后移量 musicLeadMs：音频文件位置 0 所对应的 songTime。
+ *
+ * 推导（谱面时间列的语义是"出声之后的相对时间"）：
+ *   某音符的谱面原始时间 rawT ⇒ 它真正出声于音频文件位置 SILENCE + rawT；
+ *   要求它在 songTime = rawT + OFFSET 被判定；
+ *   而 songTime = 文件位置 + L ⇒ SILENCE + rawT + L = rawT + OFFSET
+ *   ⇒ **L = OFFSET - SILENCE**（与 rawT 无关，所以三首歌只要都遵守
+ *   `OFFSET = SILENCE + 2160` 这条口径，L 恒等于 2160）。
+ *
+ * 为什么不能再用 notes[0].t（旧口径 = 首音符 t - SILENCE）：
+ *   首音符 t = rawFirst + OFFSET，于是 L 多出了 rawFirst 那一份，
+ *   结果是**每一条音符都被提前 rawFirst 毫秒判定**（qinglian 69ms、Da_Capo 34ms…），
+ *   头一个音符刚好落在"音频开始出声"的瞬间而不是它自己的出声点。
+ *   133ms 级别的偏差就来自这里 —— 注意它和 OFFSET 的改动无关：
+ *   OFFSET 进了音符 t、又原样进了旧口径的 L，两边同时平移，对判定毫无影响。
+ */
+function musicLeadFor(offset, silence, firstNoteT) {
+  var lead = (offset || 0) - (silence || 0);
+  if (lead > 0) return lead;
+  /* 谱面头异常时（例如 OFFSET 被填成"纯后移量"而不是 SILENCE+后移量）退回旧口径：
+     宁可略有偏差，也不能算出非正的后移量（那会让音频在 songTime<=0 就出声）。 */
+  return (firstNoteT || 0) - (silence || 0);
+}
+
+/**
+ * 环境律动强度（纯函数，供 TDD）：0 = 不亮，>0 = 亮，上限 1。
+ *
+ * 为什么要有门槛（而不是"有音符就闪"）：
+ *   稀疏段（< 2.6 notes/s）本来就没几个音符，全场跟着节拍网格闪会变成一种噪音；
+ *   断连之后立刻停下律动，玩家能"看见"自己掉了连击 —— 律动本身就是一条手感反馈。
+ * 门槛之上按密度线性抬升，并叠加 0.30 的底：只要开始亮就足以被看见，
+ * 否则在门槛附近会出现"几乎看不见的闪"，等于没做。
+ * 单调性：enabled=false → 恒 0；nps 或 combo 增大时返回值单调不减。
+ * 注意：这里的"密度↑ → 亮度↑"只描述**这一层**的意图。
+ *   实际写到屏幕上的亮度还要乘 beatDuck(nps)，由后者负责密集段的反向压制
+ *   （两层分开，各自的单调性都能单独验，不会互相污染）。
+ */
+function beatStrength(nps, combo, enabled) {
+  if (!enabled) return 0;
+  if (!(combo >= BEAT_MIN_COMBO)) return 0;
+  if (!(nps > BEAT_MIN_NPS)) return 0;
+  var k = Math.min(1, (nps - BEAT_MIN_NPS) / BEAT_NPS_SPAN);
+  return 0.30 + 0.70 * k;
+}
+
+/**
+ * 环境律动的"密集降档"系数（纯函数，供 TDD）：1 = 不压制，BEAT_DUCK_FLOOR = 压到地板。
+ *
+ * 为什么需要它（v2.15.2，"音符密集时画面过于闪"）：
+ *   密集段每秒十几个判定回执（列底爆闪 / 判定线 / 判定文字），画面本身已经很亮；
+ *   环境律动若仍按"越密越亮"往上加，就是在最亮的地方叠最亮的一层 ——
+ *   叠出来的就是"一片闪"。所以过 BEAT_DUCK_NPS 之后反向收，
+ *   让"环境亮度总量"不随密度增长。
+ * 起压点 = beatStrength 的满亮密度（见常量处推导式），于是：
+ *   nps ≤ BEAT_DUCK_NPS 恒为 1（不干扰 beatStrength 的门槛语义）；
+ *   之后线性压到 BEAT_DUCK_SPAN 之外的地板。
+ * 单调性：对 nps 单调不增。故 beatStrength(nps) × beatDuck(nps)
+ *   在全曲只有 3.5 notes/s 一个峰，再密只会更安静 ——
+ *   这就是"密集时不过闪"的数学形态，测试里直接断言这一点。
+ */
+function beatDuck(nps) {
+  if (!(nps > BEAT_DUCK_NPS)) return 1;
+  if (!(BEAT_DUCK_SPAN > 0)) return BEAT_DUCK_FLOOR;
+  var k = (nps - BEAT_DUCK_NPS) / BEAT_DUCK_SPAN;
+  if (k >= 1) return BEAT_DUCK_FLOOR;
+  return 1 - (1 - BEAT_DUCK_FLOOR) * k;
+}
+
+/**
+ * 律动包络（纯函数）：一次脉冲经过 age 毫秒后还剩多少亮度，0..1。
+ * 平方衰减 —— 线性衰减的尾巴会显得"拖泥带水"，平方的收得干脆，更像鼓点。
+ * age < 0（时钟回跳/首帧）按 1 处理，不会出现负亮度。
+ */
+function beatEnvelope(age, decay) {
+  if (!(age >= 0)) return 1;
+  if (!(decay > 0)) return 0;
+  var k = 1 - age / decay;
+  return k <= 0 ? 0 : k * k;
+}
+
+window.Rhythm = {
+  LEAD_IN: LEAD_IN, RESUME_LEAD: RESUME_LEAD, START_HOLD: START_HOLD,
+  WINDOWS: WINDOWS, KEYMAP: KEYMAP,
+  SPEEDS: SPEEDS, LANE_COUNT: LANE_COUNT,
+  GRADE_ORDER: GRADE_ORDER, GRADE_WEIGHT: GRADE_WEIGHT,
+  judgeTap: judgeTap, judgeRelease: judgeRelease, worseGrade: worseGrade,
+  holdAwardAt: holdAwardAt, musicLeadFor: musicLeadFor,
+  powderPalette: function () { return PALETTE; },
+  roleName: function () { return (ACTIVE_SKIN && ACTIVE_SKIN.id) || ROLE_NAME; },
+  detectRoleName: detectRoleName,
+  /* 皮肤（v2.14）：清单、当前皮肤、切换、选择优先级 —— 供 TDD 断言 */
+  skins: function () { return SKINS; },
+  activeSkin: function () { return ACTIVE_SKIN ? ACTIVE_SKIN.id : ''; },
+  defaultSkinId: function () { return DEFAULT_SKIN_ID; },
+  applySkin: applySkin,
+  pickSkinId: pickSkinId,
+  paletteFor: paletteFor,
+  gradeRank: gradeRank, validateNotes: validateNotes,
+  /* 打击感（v2.15）：纯函数，供 TDD 断言律动门槛与包络 */
+  beatStrength: beatStrength, beatEnvelope: beatEnvelope,
+  /* v2.15.2 防频闪：密集降档 + 网格/峰值常量（测试用它验"每秒脉冲数"与"decay < grid"） */
+  beatDuck: beatDuck, BEAT_GRID_MS: BEAT_GRID_MS, BEAT_DECAY_MS: BEAT_DECAY_MS,
+  BEAT_PEAK: BEAT_PEAK,
+  layoutInfo: layoutInfo
+};
+
+/* ---------- 读取曲目（同步：music/charts.js 提供曲库，运行时 parseChart 解析谱面） ---------- */
+var params = new URLSearchParams(location.hash.slice(1));
+var qparams = new URLSearchParams(location.search);
+var engineParam = qparams.get('engine') || params.get('engine'); // ?engine=element 或 #engine=element
+var songId = params.get('song') || '';
+
+/* 从 window.RHYTHM_SONGS（music/charts.js）取曲目，谱面原文由 parseChart 运行时解析 */
+function resolveSong() {
+  var library = window.RHYTHM_SONGS || {};
+  var ids = Object.keys(library);
+  var id = library[songId] ? songId : (ids[0] || '');
+  songId = id;
+  var entry = library[id];
+  if (!entry) return null;
+  var parsed = window.RhythmChart.parseChart(entry.chart);
+  return {
+    id: id,
+    title: entry.title || parsed.meta.title,
+    bpm: entry.bpm || parsed.meta.bpm,
+    keyCount: entry.keyCount || parsed.meta.keyCount,
+    silence: entry.silence != null ? entry.silence : (parsed.meta.silence || 0),
+    offset: entry.offset != null ? entry.offset : (parsed.meta.offset || 0),
+    audio: entry.audio,
+    notes: parsed.notes
+  };
+}
+var song = resolveSong();
+
+var audio = document.getElementById('bgm');
+/* v1.7 Web Audio 引擎对象（fetch 失败 / 无 AudioContext 时保持 null → 回退元素引擎） */
+var actx = null, waGain = null, waReady = null, waBuffer = null, waSource = null;
+var noteLayer, fxLayer, judgeEl, comboEl, cdEl;
+/* v2.15 反馈层元素：环境律动层、判定线、六条轨道背景（按轨道号缓存在数组里，
+   避免每次按键都 querySelector）。都是 init 时就固定下来的，不会随 resize 重建。 */
+var beatGlowEl = null, judgeLineEl = null, laneEls = null;
+/* v2.15：HUD 里每帧都要写的元素也缓存起来，别每帧 getElementById */
+var hudScoreEl = null, hudAccEl = null, progEl = null;
+
+/* ---------- 运行状态 ---------- */
+var S = {
+  phase: 'idle',        // idle → prep → (starting 仅元素引擎) → playing → ended
+  mode: 'element',      // 'wa' | 'element'（startGame 时最终确定）
+  waStartAt: 0,         // Web Audio：声音预定响起的上下文时间（秒）
+  paused: false,
+  approach: 2100,       // 音符下落总时长(ms)
+  notes: [],
+  totalWeight: 0,
+  sumWeight: 0,
+  liveAward: 0,         // 长按实时加分中"尚未结算"的部分（HUD 准确率需扣除，避免 >100%）
+  lastT: 0,             // 最近一帧的 songTime（finish 结算残留长按时用）
+  spawnIdx: 0,
+  stats: { PERFECT: 0, GREAT: 0, GOOD: 0, MISS: 0 },
+  combo: 0, maxCombo: 0,
+  holding: [null, null, null, null, null, null],
+  prepStart: 0,
+  prepAccum: 0,
+  resuming: false,       // 暂停后"继续"是否处于 3 秒恢复倒计时中
+  resumeStart: 0,        // 恢复倒计时起点（performance.now）
+  musicLeadMs: 0,        // 音乐后移量 = OFFSET - song.silence（startGame 时算，见 musicLeadFor）
+  goScheduled: false,    // 元素引擎 GO 显示后是否已安排隐藏
+  lastEnd: 0,
+  raf: 0,
+  resync: true,        // 音频时钟需要重新锚定
+  /* v2.15 环境律动状态：beatSlot = 当前所处的节拍网格序号（换格即触发一次脉冲），
+     beatAt = 该次脉冲的 songTime，beatLevel = 那次脉冲的强度（0..1）。
+     beatWritten = 上次真正写进 DOM 的不透明度 —— 只在变化 ≥0.01 时写，省掉无意义的重绘。
+     densHead / densTail = 1 秒密度窗口的右/左端下标（只前进不后退，整首摊销 O(n)）。 */
+  beatSlot: -1, beatAt: -9999, beatLevel: 0, beatWritten: -1,
+  densHead: 0, densTail: 0
+};
+
+/* 音频时钟插值（流畅性核心） */
+var sync = { a: 0, p: 0, ready: false, graceUntil: 0 };
+
+/* 轨道几何缓存（避免每帧读 clientWidth 触发回流） */
+var M = null;
+
+/* DOM 就绪 */
+document.addEventListener('DOMContentLoaded', init);
+
+function init() {
+  noteLayer = document.getElementById('noteLayer');
+  fxLayer   = document.getElementById('fxLayer');
+  judgeEl   = document.getElementById('judgeText');
+  comboEl   = document.getElementById('combo');
+  cdEl      = document.getElementById('countdown');
+  /* v2.15 反馈层：拿到就缓存住；拿不到（样式被改坏/元素被删）只是少了反馈，不影响判定 */
+  beatGlowEl  = document.getElementById('beatGlow');
+  judgeLineEl = document.getElementById('judgeLine');
+  laneEls = [];
+  for (var li = 0; li < LANE_COUNT; li++) {
+    laneEls.push(document.querySelector('.lane-bg[data-track="' + li + '"]'));
+  }
+  /* HUD 每帧写入的三个元素（updateHud 是热路径，不做每帧查询） */
+  hudScoreEl = document.getElementById('hudScore');
+  hudAccEl   = document.getElementById('hudAcc');
+  progEl     = document.getElementById('progressBar');
+
+  /* 皮肤（v2.14）：把构建期清单里的皮肤渲染到右侧皮肤栏，并套用选中的那套。
+     放在最前面 —— 后面任何一步出错都不该让"换皮肤"失效。 */
+  applySkin(initialSkinId(), false);
+
+  /* 速度选择（记忆偏好；旧版本速度值 ×1.5 迁移）
+     用 LS 包装：存储不可用时按默认速度继续，不能因为读偏好失败就中断 init
+     —— init 一断，下面所有按钮监听都挂不上，整个页面就废了。 */
+  var savedSp = parseInt(LS.get('rhythm_speed') || '2100', 10);
+  if (SPEEDS.indexOf(savedSp) === -1) {
+    savedSp = SPEEDS.indexOf(Math.round(savedSp * 1.5)) === -1 ? 2100 : Math.round(savedSp * 1.5);
+    LS.set('rhythm_speed', String(savedSp));
+  }
+  var row = document.getElementById('speedRow');
+  Array.prototype.forEach.call(row.children, function (b) {
+    if (parseInt(b.dataset.sp, 10) === savedSp) selectSpeed(b);
+    b.addEventListener('click', function () { selectSpeed(b); });
+  });
+  function selectSpeed(btn) {
+    Array.prototype.forEach.call(row.children, function (b) { b.classList.remove('sel'); });
+    btn.classList.add('sel');
+    S.approach = parseInt(btn.dataset.sp, 10);
+    LS.set('rhythm_speed', String(S.approach));
+  }
+
+  /* 音量（两引擎同步）。
+     v2.15：默认 50%（原来的 70% 对多数耳机的游戏音轨偏响），并记住玩家调过的值。
+     读偏好走 LS 包装：存储不可用时直接用 HTML 里的默认值，不能因此中断 init。 */
+  var volEl = document.getElementById('vol');
+  var savedVol = parseInt(LS.get('rhythm_volume') || '', 10);
+  if (isFinite(savedVol) && savedVol >= 0 && savedVol <= 100) volEl.value = String(savedVol);
+  volEl.addEventListener('input', function () {
+    audio.volume = parseInt(this.value, 10) / 100;
+    if (waGain) waGain.gain.value = audio.volume;
+    LS.set('rhythm_volume', this.value);
+  });
+
+  document.getElementById('btnStart').addEventListener('click', startGame);
+  document.getElementById('btnPause').addEventListener('click', function () { togglePause(true); });
+  document.getElementById('btnResume').addEventListener('click', startResume);
+  document.getElementById('btnRestart').addEventListener('click', reload);
+  document.getElementById('btnRetry').addEventListener('click', reload);
+  document.getElementById('btnQuit').addEventListener('click', back);
+  document.getElementById('btnQuit2').addEventListener('click', back);
+
+  /* 键盘 */
+  window.addEventListener('keydown', function (e) {
+    /* 结算页：给键盘留出口。轨道键在这里一律不响应（结算后 songTime 变成
+       lastEnd+99999，再喂给 laneDown 毫无意义）。Esc = 返回选择，Enter/空格 = 再来一次。 */
+    if (S.phase === 'ended') {
+      if (e.code === 'Escape') { e.preventDefault(); back(); return; }
+      if (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space') {
+        e.preventDefault(); reload(); return;
+      }
+      return;
+    }
+    if (e.code === 'Escape') { togglePause(true); return; }
+    var track = KEYMAP[e.code];
+    if (track === undefined || e.repeat) return;
+    e.preventDefault();
+    laneDown(track);
+  });
+  window.addEventListener('keyup', function (e) {
+    if (S.phase === 'ended') return;
+    var track = KEYMAP[e.code];
+    if (track === undefined) return;
+    laneUp(track);
+  });
+
+  /* 触屏 / 鼠标按键 */
+  Array.prototype.forEach.call(document.querySelectorAll('.key'), function (k) {
+    var track = parseInt(k.dataset.track, 10);
+    k.addEventListener('pointerdown', function (e) {
+      e.preventDefault(); k.setPointerCapture(e.pointerId); laneDown(track);
+    });
+    k.addEventListener('pointerup',   function () { laneUp(track); });
+    k.addEventListener('pointercancel', function () { laneUp(track); });
+  });
+
+  window.addEventListener('resize', function () { M = null; });
+
+  audio.addEventListener('ended', function () { finish(); });
+
+  /* 曲目已由 resolveSong() 同步解析（music/charts.js + parseChart）→ 初始化曲目相关 UI */
+  if (!song) {
+    document.getElementById('startTitle').textContent = '未找到曲目';
+    document.getElementById('startInfo').textContent = '请通过音游选择页进入';
+    document.getElementById('btnStart').style.display = 'none';
+  } else {
+    initSongUI();
+  }
+}
+
+/* 曲目加载完成后的 UI 初始化（依赖 song 的部分） */
+function initSongUI() {
+  /* 界面信息 */
+  document.title = '音游 · ' + song.title;
+  document.getElementById('hudTitle').innerHTML =
+    song.title + ' <small>BPM ' + song.bpm + ' · ' + song.notes.length + ' notes</small>';
+  document.getElementById('startTitle').textContent = song.title;
+  var brSong = document.getElementById('brSong');
+  if (brSong) brSong.textContent = song.title;
+  audio.src = song.audio;
+  audio.volume = parseInt(document.getElementById('vol').value, 10) / 100;
+  audio.addEventListener('loadedmetadata', function () {
+    var dur = Math.round(audio.duration || 0);
+    document.getElementById('startInfo').textContent =
+      'BPM ' + song.bpm + ' · 6K · ' + song.notes.length + ' 音符 · 时长 ' +
+      Math.floor(dur / 60) + ':' + String(dur % 60).padStart(2, '0') +
+      ' · 基准分 1,000,000';
+  });
+
+  /* v1.7 Web Audio 引擎：页面加载即解码（上下文 suspended 也能解码），
+     点击开始时 resume + 采样级调度；fetch 不可用（file:// 等）自动回退 */
+  if (engineParam !== 'element') {
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) {
+        actx = new AC();
+        waGain = actx.createGain();
+        waGain.gain.value = audio.volume;
+        waGain.connect(actx.destination);
+        waReady = fetch(song.audio)
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.arrayBuffer(); })
+          .then(function (ab) { return actx.decodeAudioData(ab); })
+          .then(function (buf) { waBuffer = buf; return true; })
+          .catch(function () { return false; });
+      }
+    } catch (e) { waReady = null; }
+  }
+}
+
+function reload() { location.reload(); }
+function back() { location.href = 'index.html'; }
+
+/* ---------- 轨道几何（缓存） ---------- */
+function laneMetrics() {
+  if (M) return M;
+  var lanes = document.getElementById('lanes');
+  var h = lanes.clientHeight;
+  var judgeY = h - parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--judge-y'));
+  var w = lanes.clientWidth;
+  var laneW = w / LANE_COUNT;
+  /* v1.3 JS 兜底：CSS 变量/媒体查询全线失效的极端环境（宽度坍塌为 0）时，
+     直接用 JS 铺设轨道几何，保证音符永远按 6 列分布，绝不堆在 x=0 */
+  if (!isFinite(laneW) || laneW < 20) {
+    laneW = Math.max(78, Math.min(132, window.innerWidth / 10));
+    w = laneW * LANE_COUNT;
+    lanes.style.width = w + 'px';           // 覆写 #lanes 宽度
+    var bgs = lanes.querySelectorAll('.lane-bg');
+    for (var i = 0; i < bgs.length; i++) {  // 覆写每条轨道背景的宽度与偏移
+      bgs[i].style.width = laneW + 'px';
+      bgs[i].style.left = (laneW * i) + 'px';
+    }
+    var wrap = document.querySelector('#keypads .pad-wrap');
+    if (wrap) wrap.style.width = w + 'px';  // 键区同步，避免与轨道错位
+  }
+  var pxPerMs = (judgeY + 80) / S.approach; // 出现时刚好露出顶格
+  M = { judgeY: judgeY, pxPerMs: pxPerMs, laneW: laneW };
+  return M;
+}
+
+/* v1.3：布局体检（验证问题 1 是否彻底修复的钩子，也供 TDD 断言） */
+function layoutInfo() {
+  var lanes = document.getElementById('lanes');
+  var m = laneMetrics();
+  var bgs = lanes.querySelectorAll('.lane-bg');
+  var bgLefts = [];
+  for (var i = 0; i < bgs.length; i++) bgLefts.push(bgs[i].getBoundingClientRect().left);
+  return {
+    lanesWidth: lanes.clientWidth,
+    laneW: m.laneW,
+    laneCount: bgs.length,
+    bgSpread: Math.max.apply(null, bgLefts) - Math.min.apply(null, bgLefts), // 六条背景轨的水平展开距离
+    cssVarLaneW: getComputedStyle(document.documentElement).getPropertyValue('--lane-w').trim(),
+    usable: m.laneW >= 20
+  };
+}
+
+/* ---------- 开始 / 计时 ---------- */
+function startGame() {
+  document.getElementById('start').classList.remove('show');
+  setJudgeFeedback(false);          // v2.15：清掉开始前可能残留的列高亮/律动亮度
+  S.notes = song.notes.map(function (n, i) {
+    return { t: n.t, track: n.track, type: n.type, end: n.end, id: i, state: 0, el: null };
+  });
+  S.totalWeight = S.notes.length;
+  S.lastEnd = S.notes.reduce(function (m, n) { return Math.max(m, n.end || n.t); }, 0);
+  /* 音乐后移量 = OFFSET - SILENCE（见 musicLeadFor）。
+     不能再用 notes[0].t - silence —— 那会把每条音符都提前 rawFirst 毫秒。 */
+  S.musicLeadMs = musicLeadFor(song.offset, song.silence, song.notes[0] ? song.notes[0].t : 0);
+  sync.ready = false;
+  M = null;
+
+  if (waReady) {
+    actx.resume()                                   // 在用户手势内解锁音频上下文
+      .catch(function () {})
+      .then(function () { return waReady; })
+      .then(function (ok) { if (ok && waBuffer) startWaRun(); else startElementRun(); })
+      .catch(function () { startElementRun(); });
+  } else {
+    startElementRun();
+  }
+}
+
+/* v1.7 Web Audio：采样级精确调度 —— 声音在 waStartAt 时刻准时响起 */
+function startWaRun() {
+  S.mode = 'wa';
+  S.waStartAt = actx.currentTime + LEAD_IN / 1000;
+  waSource = actx.createBufferSource();
+  waSource.buffer = waBuffer;
+  waSource.connect(waGain);
+  waSource.onended = function () { if (S.phase === 'playing') finish(); };
+  waSource.start(S.waStartAt + S.musicLeadMs / 1000);  // 音乐后移：音频在 songTime=musicLeadMs 才出声
+  beginRun();
+}
+
+/* v1.8 元素引擎回退：不再静音预热。预热 play() 的 promise 若在 enterStarting
+   之后才 resolve，会 pause()+currentTime=0 干扰已真正开始的播放（竞态），
+   反而可能让 currentTime 非 0。启动延迟交给 START_HOLD 冻结吸收即可。 */
+function startElementRun() {
+  S.mode = 'element';
+  beginRun();
+}
+
+function beginRun() {
+  S.phase = 'prep';
+  S.prepStart = performance.now();
+  S.prepAccum = 0;
+  S.goScheduled = false;
+  cdEl.classList.add('show');
+  S.raf = requestAnimationFrame(frame);
+}
+
+/**
+ * 当前歌曲时间(ms)：准备期为负值，歌曲出声瞬间恰好为 0。
+ * starting 期（play() 已调用但尚未出声）：时钟冻结在 S.musicLeadMs
+ * （音频文件 0 对应的 songTime），与 onStarted 的锚定值完全一致，
+ * 保证进入 playing 瞬间 songTime 无跳变（音符不瞬移）。
+ * 播放期 = 音频时间锚 + performance.now 插值（丝滑），漂移限速微调。
+ */
+function songTime() {
+  /* v1.7 Web Audio：上下文硬件时钟，跨 0 连续无跳变；suspend 时自动冻结 */
+  if (S.mode === 'wa') {
+    if (S.phase === 'ended') return S.lastEnd + 99999;
+    return (actx.currentTime - S.waStartAt) * 1000;
+  }
+  if (S.phase === 'prep') return S.prepAccum - LEAD_IN;
+  if (S.phase === 'starting') return S.musicLeadMs;   // 与 onStarted 锚定值一致，切换无跳变
+  if (S.phase === 'playing') {
+    var aMs = audio.currentTime * 1000 + S.musicLeadMs;
+    var pMs = performance.now();
+    if (!sync.ready || S.resync) {
+      sync.a = aMs; sync.p = pMs; sync.ready = true; S.resync = false;
+      return aMs;
+    }
+    var est = sync.a + (pMs - sync.p);
+    var drift = aMs - est;
+    if ((drift > 250 || drift < -250) && pMs > sync.graceUntil) {
+      // 大偏差（卡顿/恢复）→ 硬同步；但刚出声后的宽限期内不硬同步，
+      // 避免把锚定为 0 的时钟立刻又跳回 audio.currentTime（首音符瞬移 MISS）
+      sync.a = aMs; sync.p = pMs;
+      return aMs;
+    }
+    if (drift !== 0) {                            // 小偏差 → 每帧最多 ±2.5ms 平滑追赶
+      sync.a += Math.max(-2.5, Math.min(2.5, drift * 0.08));
+    }
+    return sync.a + (pMs - sync.p);
+  }
+  return S.lastEnd + 99999; // ended
+}
+
+/* ---------- 主循环 ---------- */
+function frame() {
+  if (S.paused) { S.raf = requestAnimationFrame(frame); return; }
+
+  /* 暂停后"继续"的 3 秒恢复倒计时：只推进倒计时，音符/音频保持冻结 */
+  if (S.resuming) {
+    var rl = RESUME_LEAD - (performance.now() - S.resumeStart);
+    cdEl.textContent = rl > 0 ? Math.ceil(rl / 1000) : 'GO';
+    if (rl <= 0) {
+      S.resuming = false;
+      cdEl.classList.remove('show');
+      resumePlayback();
+    }
+    S.raf = requestAnimationFrame(frame);
+    return;
+  }
+
+  if (S.phase === 'prep') {
+    if (S.mode === 'wa') {
+      var tw = songTime();
+      cdEl.textContent = tw < 0 ? Math.ceil(-tw / 1000) : 'GO';
+      if (tw >= 0) {
+        S.phase = 'playing';
+        setTimeout(function () { cdEl.classList.remove('show'); }, 350);
+      }
+    } else {
+      S.prepAccum = performance.now() - S.prepStart;
+      var left = LEAD_IN - S.prepAccum;
+      if (left > 0) {
+        cdEl.textContent = Math.ceil(left / 1000);
+      } else {
+        cdEl.textContent = 'GO';
+        if (!S.goScheduled) {
+          S.goScheduled = true;
+          setTimeout(function () { cdEl.classList.remove('show'); }, 400);  // GO 显示 400ms 后隐藏
+        }
+      }
+      if (S.prepAccum >= LEAD_IN + S.musicLeadMs) enterStarting();  // songTime=musicLeadMs（音频文件 0）时触发 play()，与 starting 冻结值一致无跳变
+    }
+  }
+
+  if (S.phase === 'playing' || S.phase === 'prep' || S.phase === 'starting') {
+    var t = songTime();
+    spawnNotes(t);
+    tickHold(t);          // 长按实时加分：须在 autoResolve 之前（结算后 state=2 不再发放）
+    autoResolve(t);
+    renderNotes(t);
+    updateHud(t);
+    if (S.phase === 'playing') beatPulse(t);   // v2.15：环境律动由既有帧驱动，不另开定时器
+    /* 结束标准 = 歌曲播放完成（而非曲谱结束）：ended/onended 事件为主触发；
+       此处按「音频时长 + 音乐后移量」兜底，防止事件丢失导致永不结算 */
+    if (S.phase === 'playing') {
+      var durMs = (S.mode === 'wa' && waBuffer) ? waBuffer.duration * 1000
+                : (audio.duration ? audio.duration * 1000 : 0);
+      if (durMs && t >= S.musicLeadMs + durMs) finish();
+    }
+  }
+
+  /* finish() 可能是从本帧里被调用的（上面的时长兜底），此时 S.raf 已被取消；
+     若无条件再排一帧，循环会在结算后继续跑（songTime 已变成 lastEnd+99999，
+     updateHud 每帧还在写 DOM）。结算后彻底停掉。 */
+  if (S.phase !== 'ended') S.raf = requestAnimationFrame(frame);
+}
+
+/* ---------- 音频起点锚定（v1.6） ---------- */
+/**
+ * 准备期最后 START_HOLD 毫秒进入：立即调用 audio.play()（浏览器加载/解码
+ * 有启动延迟）。starting 阶段时钟冻结在 S.musicLeadMs（音频文件 0 对应
+ * songTime），音频真正出声（playing 事件或 play() promise resolve）的瞬间
+ * 把 phase 切到 playing 并重锚时钟为同样的 S.musicLeadMs —— 切换无跳变，
+ * 音符不会瞬移；随后靠 drift 平滑追赶把锚点与真实 currentTime 对齐。
+ */
+function enterStarting() {
+  S.phase = 'starting';
+  cdEl.textContent = 'GO';
+  S.audioStarted = false;
+  try { audio.currentTime = 0; } catch (e) {}   // 确保从头开始，杜绝任何残留进度
+  var onStarted = function () {
+    if (S.audioStarted || S.phase !== 'starting') return;  // resume 也会触发 playing，只认首次
+    S.audioStarted = true;
+    audio.removeEventListener('playing', onStarted);
+    /* v1.8 + v2.4：锚定到 S.musicLeadMs（音频文件 0 对应 songTime=musicLeadMs）。
+       不用 audio.currentTime（卡顿导致 playing 回调延迟时 currentTime 已 >0 会
+       令首音符瞬移到判定线下方 MISS）。此值与 starting 阶段冻结值一致，
+       进入 playing 瞬间 songTime 无跳变。
+       v2.13.1：musicLeadMs = OFFSET - SILENCE ⇒ 音频出声点（文件位置 SILENCE）对应
+       songTime = SILENCE + (OFFSET - SILENCE) = OFFSET = 首音符 rawFirst 的出声时刻，
+       即"每条音符都在它自己的出声时刻被判定"。旧口径多算了 rawFirst，会整体偏早。 */
+    sync.a = S.musicLeadMs;
+    sync.p = performance.now();
+    sync.ready = true;
+    sync.graceUntil = performance.now() + 800;  // 出声后 800ms 内抑制硬同步
+    S.resync = false;
+    S.phase = 'playing';
+    setTimeout(function () { cdEl.classList.remove('show'); }, 350);
+  };
+  audio.addEventListener('playing', onStarted);
+  audio.play().then(onStarted).catch(function () { togglePause(true); });
+}
+
+/* ---------- 音符生成 ---------- */
+function spawnNotes(t) {
+  var m = laneMetrics();
+  while (S.spawnIdx < S.notes.length) {
+    var n = S.notes[S.spawnIdx];
+    var spawnT = Math.max(0, n.t - S.approach);   // 音符 spawn 时间（不早于 GO，从顶端下落）
+    if (t < spawnT) break;
+    var el = document.createElement('div');
+    if (n.type === 1) {
+      var d = m.laneW * TAP_RATIO;              // 圆形短按：直径约 0.8 轨宽
+      el.className = 'note tap c' + n.track;
+      el.style.width = d + 'px';
+      el.style.height = d + 'px';
+      el.style.left = (n.track * m.laneW + (m.laneW - d) / 2) + 'px';
+      el._d = d;                                 // 缓存直径，渲染时不读 offsetWidth
+      noteLayer.appendChild(el);
+      n.speed = (m.judgeY + 80) / (n.t - spawnT); // 下落速度：前奏音符(n.t<approach)更快，从顶端冲下
+    } else {
+      var cw = m.laneW * HOLD_RATIO;            // 长按头/尾圆直径
+      el.className = 'note hold';
+      el.style.width = cw + 'px';
+      el.style.setProperty('--hd', cw + 'px');  // body top/bottom = head 直径，确保 body 仅占 head/tail 圆之间
+      el.style.left = (n.track * m.laneW + (m.laneW - cw) / 2) + 'px';
+      el._d = cw;
+      var body = document.createElement('div'); body.className = 'body';
+      var head = document.createElement('div'); head.className = 'head c' + n.track;
+      var tail = document.createElement('div'); tail.className = 'tail c' + n.track;
+      el.appendChild(body); el.appendChild(head); el.appendChild(tail);
+      noteLayer.appendChild(el);
+    }
+    n.spawnT = spawnT;
+    n.el = el;
+    S.spawnIdx++;
+  }
+}
+
+/* ---------- 自动判定（漏击 / 长按自然结束） ---------- */
+function autoResolve(t) {
+  for (var i = 0; i < S.notes.length; i++) {
+    var n = S.notes[i];
+    if (n.t - t > WINDOWS.GOOD) break;                  // 后面都还没到
+    if (n.state === 0 && n.t < t - WINDOWS.GOOD) {      // 头部漏击
+      resolveNote(n, 0, 'MISS');
+      continue;
+    }
+    /* 长按（v2.11）：按住到 n.end 后仍给玩家 RELEASE 窗口去精确松手。
+       超过 n.end + RELEASE 仍未松手 → 尾判定以 GOOD 保底结算
+       （确实按到位了，只是没有精确松手，故不给 PERFECT 也不判 MISS）。 */
+    if (n.type === 2 && n.state === 1 && t >= n.end + WINDOWS.RELEASE) {
+      var g = worseGrade(n.headGrade, 'GOOD');
+      resolveNote(n, GRADE_WEIGHT[g], g);
+    }
+  }
+}
+
+/* ---------- 长按实时加分（v2.12） ----------
+   按住期间按"已按住进度"逐步把权重计入总分，分数随进度条实时上涨，
+   而不是等松手才一次性结算。满额 = 头部判定权重（头没按准就不可能拿高分）。
+   tickHold 只增不减；尾判定比头部差时由 resolveNote 补差额扣回。 */
+
+/**
+ * 长按实时加分（纯函数，供 test_rhythm.html TDD）：某时刻"此刻应该已发放"的权重。
+ *   prog = (t - n.t) / (n.end - n.t)，夹到 [0, 1]
+ *   · t ≤ n.t   → 0（还没开始按）
+ *   · t ≥ n.end → maxAward（过 E 后封顶，不再继续涨分）
+ *   · 中间      → prog * maxAward（随按住进度线性增长）
+ * 返回值随时间单调不减 → 逐帧调用不会让分数回退。
+ */
+function holdAwardAt(t, n) {
+  var max = n.maxAward || 0;
+  var span = n.end - n.t;
+  if (span <= 0) return max;
+  var prog = (t - n.t) / span;
+  if (prog <= 0) return 0;
+  if (prog >= 1) return max;
+  return prog * max;
+}
+
+function tickHold(t) {
+  for (var i = 0; i < S.spawnIdx; i++) {
+    var n = S.notes[i];
+    if (n.type !== 2 || n.state !== 1) continue;
+    var target = holdAwardAt(t, n);
+    if (target > n.awarded) {
+      var delta = target - n.awarded;
+      S.sumWeight += delta;             // 分数实时上涨
+      S.liveAward += delta;             // 尚未结算：HUD 准确率要扣掉，否则会 >100%
+      n.awarded = target;
+    }
+  }
+}
+
+/* ---------- 渲染（圆心对齐判定线；长按头在下、尾在上） ---------- */
+function renderNotes(t) {
+  var m = laneMetrics();
+  for (var i = 0; i < S.spawnIdx; i++) {
+    var n = S.notes[i];
+    if (n.state === 2) continue;                        // 已结算，动画中
+    if (n.type === 1) {
+      var d = n.el._d || m.laneW * TAP_RATIO;
+      var y = -80 - d / 2 + n.speed * (t - n.spawnT);   // 从顶端(-80)开始下落，n.t 时圆心对齐判定线
+      n.el.style.translate = '0 ' + y + 'px';
+    } else {
+      var hd = n.el._d || m.laneW * HOLD_RATIO;
+      var tailCenter = m.judgeY - (n.end - t) * m.pxPerMs;
+      var top, height;
+      if (n.state === 1) {
+        /* 按住中：头钉在判定线、身体随消耗缩短；
+           一旦过了 E（over > 0）整条恢复向下运动，不允许因为玩家不松手
+           而长时间滞留在判定线上（v2.12）。 */
+        height = Math.max(hd, (n.end - t) * m.pxPerMs + hd);
+        var over = Math.max(0, t - n.end) * m.pxPerMs;
+        top = m.judgeY + hd / 2 - height + over;
+      } else {                                          // 未按：整体下落
+        height = (n.end - n.t) * m.pxPerMs + hd;
+        top = tailCenter - hd / 2;
+      }
+      n.el.style.height = height + 'px';
+      n.el.style.translate = '0 ' + top + 'px';
+    }
+  }
+}
+
+/* ---------- 输入 ---------- */
+function laneDown(track) {
+  var key = document.querySelector('.key[data-track="' + track + '"]');
+  if (key) key.classList.add('active');
+  lanePulse(track, true);                               // v2.15：整列亮起，视线不用去找圆点
+  if (S.phase !== 'playing' && S.phase !== 'prep' && S.phase !== 'starting') return;
+  if (S.paused || S.resuming) return;   // 恢复倒计时期间不判定，避免误按
+
+  var t = songTime();
+  var best = null, bestDt = Infinity;
+  for (var i = 0; i < S.notes.length; i++) {
+    var n = S.notes[i];
+    if (n.t - t > WINDOWS.GOOD) break;
+    if (n.track !== track || n.state !== 0) continue;
+    var dt = Math.abs(n.t - t);
+    if (dt <= WINDOWS.GOOD && dt < bestDt) { best = n; bestDt = dt; }
+  }
+  if (!best) return;                                    // 空按：不惩罚
+
+  var j = judgeTap(best.t - t);
+  if (best.type === 1) {
+    resolveNote(best, j ? j.weight : 0, j ? j.grade : 'MISS');
+  } else {
+    best.state = 1;                                     // 进入按住状态
+    best.headWeight = j ? j.weight : 0;
+    best.headGrade  = j ? j.grade : 'MISS';
+    /* 实时加分（v2.12）：满额 = 头部判定权重（头没按准就不可能拿高分），
+       awarded 记录已发放量，按住期间由 tickHold 逐步累加，结算时补差额。 */
+    best.maxAward = GRADE_WEIGHT[best.headGrade];
+    best.awarded  = 0;
+    S.holding[track] = best;
+    best.el.classList.add('holding');
+    if (j) { hitFx(best.track); showJudge(j.grade); }
+  }
+}
+
+function laneUp(track) {
+  var key = document.querySelector('.key[data-track="' + track + '"]');
+  if (key) key.classList.remove('active');
+  lanePulse(track, false);                              // v2.15：松手即灭
+  var n = S.holding[track];
+  if (!n) return;
+  S.holding[track] = null;
+  if (n.state !== 1) return;                            // 已结算，忽略晚抬键
+
+  var t = songTime();
+  /* 尾判定独立评分（v2.11）：按松手时刻与 E 的偏差给 PERFECT/GREAT/GOOD，
+     过早松手（超出 RELEASE）→ judgeRelease 返回 null → MISS。
+     最终评级 = 头部判定 与 尾部判定 中更差者。 */
+  var jr = judgeRelease(t - n.end);
+  var g = worseGrade(n.headGrade, jr ? jr.grade : 'MISS');
+  resolveNote(n, GRADE_WEIGHT[g], g);
+}
+
+/* ---------- 结算 ---------- */
+function resolveNote(n, weight, grade) {
+  if (n.state === 2) return;
+  n.state = 2;
+  /* 长按在按住期间已由 tickHold 实时发放过部分权重（n.awarded），这里只补差额 ——
+     尾判定比头部差就扣回、更好就补足；短按/头漏击没有实时发放，一次性计入。 */
+  if (n.awarded > 0) {
+    S.sumWeight += weight - n.awarded;
+    S.liveAward -= n.awarded;                          // 这笔已结算，转入正式计分
+    if (S.liveAward < 0) S.liveAward = 0;
+    n.awarded = 0;
+  } else {
+    S.sumWeight += weight;
+  }
+  S.stats[grade] = (S.stats[grade] || 0) + 1;
+  /* 长按被 autoResolve 提前结算（到了 E+RELEASE 还没松手）时，
+     必须同时清掉 S.holding，否则玩家之后抬手会被当成"还在按住"。 */
+  if (S.holding[n.track] === n) S.holding[n.track] = null;
+
+  if (grade === 'MISS') { S.combo = 0; }
+  else { S.combo++; if (S.combo > S.maxCombo) S.maxCombo = S.combo; }
+  updateCombo();
+
+  if (grade !== 'MISS') hitFx(n.track);
+  /* v2.15：三层同时给回执 —— 列底爆闪（哪一列）+ 判定线亮灭（这次成不成）+ 判定文字。
+     爆闪颜色按等级走，MISS 用红色，所以"漏了"也能一眼看出漏在哪一列。 */
+  hitImpact(n.track, grade);
+  judgeLinePulse(grade === 'MISS');
+  showJudge(grade);
+
+  if (n.el) {
+    var rect = n.el.getBoundingClientRect();            // 崩解前位置：必须在加动画 class 之前取
+    n.el.classList.remove('holding');
+    n.el.classList.add(grade === 'MISS' ? 'miss' : 'hit');
+    shatterFx(rect, grade === 'MISS', n.type);          // 打碎为粉末，向外扩散消失（配色取自该音符的图）
+    (function (el) { setTimeout(function () { el.remove(); }, 380); })(n.el);
+    n.el = null;
+  }
+}
+
+/* ---------- 特效 / HUD ---------- */
+/* ---------- 粉末配色（v2.13）：直接取自音符图片 ----------
+   音符长什么样，打碎后的粉末就是什么颜色 ——
+   短按音符号 = role/<角色>/D.png        → 用 D.png 的关键色
+   长按音符号 = R.png（头尾）+ Trailing.png（拖尾） → 用两者的关键色混合
+   颜色由 gen_palette.js 在构建期从 PNG 里 k-means 抽出来，写成 role/palette.js。
+   （运行时不能用 canvas 取样：file:// 下画布会被污染，getImageData 抛 SecurityError。）
+   取不到 palette.js 时退回内置色，音游不会因为缺这个文件而挂掉。 */
+var POWDER_FALLBACK = {
+  tap:  { hit:  ['#ffe6a3', '#ffd166', '#9fe4ff', '#c9b6ff', '#ffffff', '#ffb3c7'],
+          miss: ['#7f8a9e', '#9aa5b5', '#6b7488'] },
+  hold: { hit:  ['#f7f3ee', '#addcf9', '#76c4f6', '#d1c0b5', '#c9b6ff', '#f4d7e0'],
+          miss: ['#7f8a9e', '#9aa5b5', '#6b7488'] }
+};
+/* 按键圆点兜底色：palette.js 里缺 key 字段时用（与 :root 的 --key-col 默认值一致） */
+var KEY_COLOR_FALLBACK = 'rgba(255,255,255,0.85)';
+
+/* 角色名兜底来源：CSS --bg-image 里的文件夹名。
+   正常路径已改为读构建期生成的皮肤清单 role/skins.js（见下面 SKINS / ACTIVE_SKIN）；
+   这个函数保留给"清单缺失"（例如只放 palette.js）时的退化情形。 */
+function detectRoleName() {
+  var raw = '';
+  try {
+    raw = getComputedStyle(document.documentElement).getPropertyValue('--bg-image') || '';
+  } catch (e) { raw = ''; }
+  var m = /role\/([^\/'")]+)\//.exec(raw);
+  return m ? m[1] : '';
+}
+
+var ROLE_NAME = detectRoleName();
+
+/* ---------- 皮肤（v2.14）----------
+   清单来自构建期生成的 role/skins.js（window.RHYTHM_SKINS，有序数组）：每项登记
+   该皮肤的背景 + 短按图 + 长按头图 + 拖尾图 + 配色键。它既是"右侧皮肤栏要一一列出的
+   东西"，也是"换皮肤要一次换掉的东西"的唯一来源 —— 以前这四张图写死在 CSS 里，
+   换皮肤得手改 4 处 url()，漏一处就成了"背景换了、音符还是旧的"。 */
+var SKIN_KEY = 'rhythm_skin';
+
+var SKINS = (function () {
+  var raw = (typeof window !== 'undefined' && window.RHYTHM_SKINS) || null;
+  var list = [];
+  if (raw && raw.length) {
+    for (var i = 0; i < raw.length; i++) {
+      var r = raw[i] || {};
+      var id = r.id || r.name || ('skin' + (i + 1));
+      list.push({
+        id: id,
+        name: r.name || id,
+        background: r.background || '',
+        tap: r.tap || '',
+        head: r.head || '',
+        trail: r.trail || '',
+        palette: r.palette || id,
+        preview: r.preview || r.background || r.tap || ''
+      });
+    }
+  }
+  if (!list.length) {
+    /* 退化：没有 skins.js 时按 CSS --bg-image 推导"单皮肤"，行为与 v2.13 一致，页面不空 */
+    var all = (typeof window !== 'undefined' && window.RHYTHM_ROLE_PALETTE) || {};
+    var name = ROLE_NAME || (Object.keys(all)[0] || '');
+    if (name) {
+      list.push({
+        id: name, name: name,
+        background: 'role/' + name + '/Background.png',
+        tap: 'role/' + name + '/D.png',
+        head: 'role/' + name + '/R.png',
+        trail: 'role/' + name + '/Trailing.png',
+        palette: name,
+        preview: 'role/' + name + '/Background.png'
+      });
+    }
+  }
+  return list;
+}());
+
+var DEFAULT_SKIN_ID = (typeof window !== 'undefined' && window.RHYTHM_SKINS_DEFAULT) || '';
+var ACTIVE_SKIN = null;
+
+/* 皮肤选择优先级（纯函数，供 TDD）：?skin= > 上次选择 > 清单默认 > 第一项。
+   一律要求"这个 id 真的在清单里"才用，否则跳过 —— 删掉某套皮肤后，
+   旧的 URL/记录不会把页面搞成空白。 */
+function pickSkinId(paramId, savedId, defaultId, ids) {
+  if (paramId && ids.indexOf(paramId) >= 0) return paramId;
+  if (savedId && ids.indexOf(savedId) >= 0) return savedId;
+  if (defaultId && ids.indexOf(defaultId) >= 0) return defaultId;
+  return ids.length ? ids[0] : '';
+}
+
+function skinById(id) {
+  for (var i = 0; i < SKINS.length; i++) if (SKINS[i].id === id) return SKINS[i];
+  return null;
+}
+
+/* 由皮肤记录算出 shatterFx 用的调色板（字段与 v2.13 一致，测试依赖 source/role）
+   v2.15：把构建期一起抽出来的 `key`（按键主色）也带出来 —— 此前 gen_palette.js
+   每套皮肤都写这个字段，播放页却从没消费过，按键圆点一直是写死的白色。 */
+function paletteFor(skin) {
+  var all = (typeof window !== 'undefined' && window.RHYTHM_ROLE_PALETTE) || {};
+  var key = skin && (skin.palette || skin.id);
+  var entry = (key && all[key]) ? all[key] : null;
+  var out = {
+    role: (skin && skin.id) || ROLE_NAME,
+    source: entry ? 'role/palette.js' : '内置兜底色',
+    key: (entry && entry.key) || KEY_COLOR_FALLBACK
+  };
+  ['tap', 'hold'].forEach(function (k) {
+    var h = entry && entry[k], m = entry && entry[k + 'Miss'];
+    out[k] = {
+      hit:  (h && h.length) ? h : POWDER_FALLBACK[k].hit,
+      miss: (m && m.length) ? m : POWDER_FALLBACK[k].miss
+    };
+  });
+  return out;
+}
+
+var PALETTE = paletteFor(skinById(DEFAULT_SKIN_ID) || SKINS[0] || null);
+
+/* 换皮肤：改写四个 CSS 变量（背景 + 三种音符图）+ 换调色板 + 刷新皮肤栏高亮 + 记住选择。
+   换皮肤只需要动这里 —— 四张图与配色一次改齐。 */
+function applySkin(id, persist) {
+  var skin = skinById(id) || skinById(DEFAULT_SKIN_ID) || SKINS[0];
+  if (!skin) return false;
+  ACTIVE_SKIN = skin;
+  var root = document.documentElement;
+  function setVar(name, url, fallback) {
+    root.style.setProperty(name, url ? "url('" + url + "')" : (fallback || 'none'));
+  }
+  setVar('--bg-image',    skin.background, 'none');
+  setVar('--tap-image',   skin.tap,        'none');
+  setVar('--head-image',  skin.head,       'none');
+  setVar('--trail-image', skin.trail,      'none');
+  PALETTE = paletteFor(skin);
+  /* v2.15：按键圆点颜色也随皮肤走（此前 palette.js 的 key 字段没人消费，
+     圆点永远写死白色）。用普通属性而不是 setVar —— 它是个颜色不是 url()。 */
+  root.style.setProperty('--key-col', PALETTE.key);
+  var roleEl = document.getElementById('brRole');
+  if (roleEl) roleEl.textContent = skin.name;
+  renderSkinBar();
+  if (persist) LS.set(SKIN_KEY, skin.id);
+  return true;
+}
+
+/* 渲染右侧皮肤栏：清单里有几套皮肤就列几个，当前项高亮。 */
+function renderSkinBar() {
+  var list = document.getElementById('skinList');
+  if (!list || !SKINS.length) return;
+  list.innerHTML = '';
+  for (var i = 0; i < SKINS.length; i++) {
+    (function (s) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'skin' + (ACTIVE_SKIN && s.id === ACTIVE_SKIN.id ? ' on' : '');
+      b.setAttribute('data-skin', s.id);
+      b.title = s.name;
+      var th = document.createElement('span');
+      th.className = 'th';
+      if (s.preview) th.style.backgroundImage = "url('" + s.preview + "')";
+      var nm = document.createElement('span');
+      nm.className = 'nm';
+      nm.textContent = s.name;
+      b.appendChild(th);
+      b.appendChild(nm);
+      b.addEventListener('click', function () { applySkin(s.id, true); });
+      list.appendChild(b);
+    }(SKINS[i]));
+  }
+  /* 只有一套皮肤时给一行提示，否则用户不知道皮肤栏还能更多 */
+  if (SKINS.length <= 1) {
+    var tip = document.createElement('div');
+    tip.className = 'tip';
+    tip.innerHTML = '在 <b>role/</b> 加文件夹，<br>重跑 build 即新增';
+    list.appendChild(tip);
+  }
+}
+
+/* 初始皮肤：?skin=<id> 可指定（方便分享/测试） */
+function initialSkinId() {
+  var paramId = qparams.get('skin') || params.get('skin') || '';
+  var ids = SKINS.map(function (s) { return s.id; });
+  return pickSkinId(paramId, LS.get(SKIN_KEY), DEFAULT_SKIN_ID, ids);
+}
+
+/* ---------- v2.15 打击感反馈层 ----------
+   设计原则（沿用 v1.9 去 backdrop-filter、v2.13 只动 transform 的性能教训）：
+   判定那一瞬间**绝不**触发重排 / 重合成。所以下面所有反馈只改
+   background / box-shadow / opacity / class，一个都不去读 offsetWidth
+   （读一下就是一次强制同步布局，正好撞在音符到线的那一帧）。
+   代价：同一列在 IMPACT_MS 内连击两次时，第二次的过渡不会重新起跳（观感略淡）。
+   用"偶尔淡一点"换"绝不掉帧"，这个交换是划算的。 */
+
+function laneBg(track) {
+  return (laneEls && laneEls[track]) || null;
+}
+
+/* ① 按住回执：整列亮起（.active），从按下一直持续到松手 */
+function lanePulse(track, on) {
+  var el = laneBg(track);
+  if (el) el.classList.toggle('active', !!on);
+}
+
+/* ② 命中爆闪：列底一次短促闪光（.hit），颜色随判定等级走。
+   MISS 也走这里（红色一闪）—— "漏了一个" 同样要给回执，否则玩家不知道漏在哪一列。 */
+function hitImpact(track, grade) {
+  var el = laneBg(track);
+  if (!el || el.classList.contains('hit')) return;
+  el.style.setProperty('--hit-col', GRADE_COLOR[grade] || '#ffffff');
+  el.classList.add('hit');
+  setTimeout(function () { el.classList.remove('hit'); }, IMPACT_MS);
+}
+
+/* ③ 判定线亮灭：命中白闪、漏击红闪（.pulse / .missline 由 CSS 定义）。
+   v2.15.2：颜色信息**每次都写**（漏击必须能看见红），但"重新起跳"要节流 ——
+   密集段每秒十几次连闪，判定线会变成一根"一直亮着的线"，反而分辨不出这一次成不成。
+   节流窗口内 .pulse 还挂着（JUDGE_FLASH_MS 130 > 间隔 90），本来也看不出重跳。 */
+function judgeLinePulse(miss) {
+  if (!judgeLineEl) return;
+  judgeLineEl.classList.toggle('missline', !!miss);
+  var at = Date.now();
+  if (at - (judgeLineEl._at || -1e9) < JUDGE_FLASH_MIN_GAP_MS) return;
+  judgeLineEl._at = at;
+  judgeLineEl.classList.add('pulse');
+  clearTimeout(judgeLineEl._t);
+  judgeLineEl._t = setTimeout(function () {
+    judgeLineEl.classList.remove('pulse');
+    judgeLineEl.classList.remove('missline');
+  }, JUDGE_FLASH_MS);
+}
+
+/* ④ 环境律动：把手上正在打的节奏变成整片场地的呼吸（#beatGlow 的 opacity）。
+   密度窗口的两个下标只前进不后退 → 整首歌总共扫一遍数组，不是每帧 O(n)。 */
+function densityAt(t) {
+  var ns = S.notes, lo = t - 1000;
+  while (S.densHead < ns.length && ns[S.densHead].t <= t) S.densHead++;
+  while (S.densTail < S.densHead && ns[S.densTail].t < lo) S.densTail++;
+  return S.densHead - S.densTail;                   // 1 秒窗口内的音符数 ≈ notes/s
+}
+
+function beatPulse(t) {
+  if (!beatGlowEl) return;
+  var slot = Math.floor(t / BEAT_GRID_MS);
+  if (slot !== S.beatSlot) {                        // 跨过一个网格 → 起一次新脉冲
+    S.beatSlot = slot;
+    S.beatAt = t;
+    var nps = densityAt(t);
+    /* v2.15.2：乘上 beatDuck —— 密度越高律动越弱。
+       原来是"越密越亮"，正好在最闪的地方叠得最狠；现在反过来，
+       峰值出现在 3.5 notes/s，再密只会更安静。 */
+    S.beatLevel = beatStrength(nps, S.combo, true) * beatDuck(nps);
+  }
+  var v = S.beatLevel * beatEnvelope(t - S.beatAt, BEAT_DECAY_MS) * BEAT_PEAK;
+  if (Math.abs(v - S.beatWritten) >= 0.01) {        // 亮度变化不到 1% 不值得写一次样式
+    S.beatWritten = v;
+    beatGlowEl.style.opacity = v.toFixed(2);
+  }
+}
+
+/* ⑤ 统一清场：开始 / 结算 / 暂停时把反馈归零，不留"还亮着的列"和"还亮着的线"。
+   （尤其重要：结算页里 keyup 会被上层直接 return，靠松手是清不掉的。） */
+function setJudgeFeedback(on) {
+  if (on) return;
+  for (var i = 0; i < LANE_COUNT; i++) {
+    var el = laneBg(i);
+    if (el) el.classList.remove('active', 'hit');
+  }
+  if (judgeLineEl) {
+    judgeLineEl.classList.remove('pulse', 'missline');
+    judgeLineEl._at = -1e9;               // v2.15.2：连节流状态一起清，重开一局第一次判定必定起跳
+  }
+  if (beatGlowEl) beatGlowEl.style.opacity = '0';
+  S.beatSlot = -1; S.beatLevel = 0; S.beatWritten = 0; S.beatAt = -9999;
+  S.densHead = 0; S.densTail = 0;
+}
+
+function shatterFx(rect, isMiss, type) {
+  if (!rect || rect.width <= 0 || rect.height <= 0) return;
+  var base = fxLayer.getBoundingClientRect();           // 换算到 fxLayer 坐标系
+  var layer = document.createElement('div');
+  layer.className = 'powder';
+  /* 扩散半径与粒子尺寸都跟随音符大小（unit = 音符直径）——
+     否则在大屏上音符有 200px、固定 104px 的扩散距离会让粉末飞不出音符本体。 */
+  var unit    = Math.max(rect.width, 60);
+  /* v2.15.2 防频闪：粒子数随密度收。
+     密集段每秒十几个音符，每片 760ms 生命 → 场上同时留着 5~8 片、
+     150~250 个在动的 DOM 节点，观感就是"整个画面一直在亮"。
+     稀疏段保持原来的丰满度（30 / 22），密集段砍到约一半。
+     密度取 S.densHead - S.densTail —— beatPulse 每帧已经算好，这里不再重扫。 */
+  var nps     = Math.max(0, S.densHead - S.densTail);
+  var dense   = Math.max(0, Math.min(1, (nps - BEAT_DUCK_NPS) / BEAT_DUCK_SPAN));
+  var budget  = 1 - 0.5 * dense;                         // 1.0（稀疏）→ 0.5（极密）
+  var count   = Math.max(10, Math.round((isMiss ? 22 : 30) * budget));
+  /* 配色跟音符类型走：短按取 D.png 的色，长按取 R.png + Trailing.png 的色 */
+  var slot    = PALETTE[type === 2 ? 'hold' : 'tap'];
+  var palette = isMiss ? slot.miss : slot.hit;
+  var reach   = unit * (isMiss ? 0.58 : 1.05);           // 径向最大扩散距离
+  var ox = rect.left - base.left, oy = rect.top - base.top;
+  for (var i = 0; i < count; i++) {
+    var p = document.createElement('i');
+    /* 角度：均分 360° 再抖动半个扇区 —— 保证每个方向都有粒子 */
+    var ang = (i / count) * Math.PI * 2
+            + (Math.random() - 0.5) * (Math.PI / count);
+    /* 三层半径，让粉末云有厚度而不是一个空环 */
+    var ring = (i % 3 === 0) ? 0.42 : ((i % 3 === 1) ? 0.72 : 1.0);
+    var dist = reach * ring * (0.82 + Math.random() * 0.36);
+    var sz   = unit * (isMiss ? (0.026 + Math.random() * 0.038)
+                              : (0.030 + Math.random() * 0.048));
+    /* 起点在音符矩形内随机撒点：长按的长条会碎成一整片粉末云 */
+    p.style.left = (ox + Math.random() * rect.width).toFixed(1) + 'px';
+    p.style.top  = (oy + Math.random() * rect.height).toFixed(1) + 'px';
+    p.style.width  = sz.toFixed(1) + 'px';
+    p.style.height = sz.toFixed(1) + 'px';
+    p.style.background = palette[(Math.random() * palette.length) | 0];
+    p.style.setProperty('--dx', (Math.cos(ang) * dist).toFixed(1) + 'px');
+    p.style.setProperty('--dy', (Math.sin(ang) * dist).toFixed(1) + 'px'); // 各向同性，无偏置
+    p.style.setProperty('--sc', (0.2 + Math.random() * 0.45).toFixed(2));
+    p.style.animationDelay = ((Math.random() * 40) | 0) + 'ms';            // 轻微错峰
+    layer.appendChild(p);
+  }
+  fxLayer.appendChild(layer);
+  setTimeout(function () { layer.remove(); }, 760);
+}
+
+function hitFx(track) {
+  var m = laneMetrics();
+  var fx = document.createElement('div');
+  fx.className = 'hitfx';
+  var ring = document.createElement('div');
+  ring.className = 'ring';
+  ring.style.left = (track * m.laneW + m.laneW / 2) + 'px';
+  fx.appendChild(ring);
+  fxLayer.appendChild(fx);
+  setTimeout(function () { fx.remove(); }, 320);
+}
+
+var judgeColor = GRADE_COLOR;
+function showJudge(grade) {
+  judgeEl.textContent = grade;
+  judgeEl.style.color = judgeColor[grade] || '#fff';
+  /* v2.15.2 防频闪：文字与颜色每次都更新（信息必达），但"重新起跳"要节流。
+     原来每判定一次就 remove→读 offsetWidth→add，密集段每秒十几次：
+     一是 380ms 的 jpop 缩放动画被反复打断重启，视觉上就是判定线上一团在抖的字；
+     二是那次 void offsetWidth 是一次强制同步布局，正好撞在音符到线的那一帧。 */
+  var at = Date.now();
+  if (at - (judgeEl._at || -1e9) < JUDGE_FLASH_MIN_GAP_MS) { judgeEl.classList.add('show'); return; }
+  judgeEl._at = at;
+  judgeEl.classList.remove('show');
+  void judgeEl.offsetWidth;
+  judgeEl.classList.add('show');
+}
+function updateCombo() {
+  if (S.combo > 0) {
+    comboEl.style.display = 'block';
+    comboEl.querySelector('.num').textContent = S.combo;
+    /* v2.15：每 50 连一次里程碑 —— 数字染金 + 弹得更狠（.milestone，见 CSS）。 */
+    comboEl.classList.toggle('milestone', S.combo % 50 === 0);
+    comboEl.classList.remove('pop');
+    void comboEl.offsetWidth;
+    comboEl.classList.add('pop');
+  } else {
+    comboEl.style.display = 'none';
+    comboEl.classList.remove('milestone');
+  }
+}
+function updateHud(t) {
+  S.lastT = t;                          // 记录最新时刻，供 finish() 结算残留长按
+  /* 分数含长按"实时加分"部分 —— 按住时数字就往上跳，这是 v2.12 的要效果 */
+  var score = Math.round(1000000 * S.sumWeight / Math.max(1, S.totalWeight));
+  document.getElementById('hudScore').textContent = score.toLocaleString();
+  var done = S.stats.PERFECT + S.stats.GREAT + S.stats.GOOD + S.stats.MISS;
+  /* 准确率的分母是"已判定音符数"，而 sumWeight 里混有正在按住、还没结算的权重，
+     必须扣除 S.liveAward，否则按住瞬间 acc 会虚高甚至超过 100%。 */
+  var accW = S.sumWeight - S.liveAward;
+  if (accW < 0) accW = 0;
+  var acc = done ? (100 * accW / done) : 100;
+  var hudAcc = document.getElementById('hudAcc');
+  if (hudAcc) {
+    /* v2.15：把"准度"作为实时回执放在分数正下方。零 MISS 时直接标 FC / AP ——
+       玩家不用等到结算才知道自己这局打得好，中途就能决定"要不要继续冲"。 */
+    var badge = (done > 0 && S.stats.MISS === 0)
+      ? (S.stats.PERFECT === done ? ' · AP' : ' · FC') : '';
+    hudAcc.textContent = acc.toFixed(2) + '%' + badge;
+    hudAcc.classList.toggle('fc', badge !== '');
+  }
+  /* 进度条 = (songTime - 音乐后移量) / 音频时长：歌曲开始播放到播完的进度。
+     v2.15：写 transform: scaleX() 而不是 width —— 见 CSS 里 #progressBar 的说明。
+     元素引用在 init 时就缓存好，不再每帧 getElementById。 */
+  var durMs = (S.mode === 'wa' && waBuffer) ? waBuffer.duration * 1000
+            : (audio.duration ? audio.duration * 1000 : 0);
+  if (durMs && progEl) {
+    var prog = Math.min(100, Math.max(0, (t - S.musicLeadMs) / durMs * 100));
+    progEl.style.transform = 'scaleX(' + (prog / 100).toFixed(4) + ')';
+  }
+}
+
+/* ---------- 暂停 ---------- */
+function togglePause(toPause) {
+  if (S.phase !== 'prep' && S.phase !== 'starting' && S.phase !== 'playing') return;
+  if (toPause === S.paused) return;
+  S.paused = toPause;
+  document.getElementById('pause').classList.toggle('show', toPause);
+  if (toPause) {
+    setJudgeFeedback(false);    // v2.15：暂停时不留亮着的列（画面越静，越像"真的停了"）
+    if (S.resuming) {                                   // 取消进行中的恢复倒计时
+      S.resuming = false;
+      cdEl.classList.remove('show');
+    }
+    if (S.mode === 'wa') {
+      actx.suspend();                                   // 上下文时钟与调度同步冻结
+    } else if (S.phase === 'prep') {
+      S.prepAccum = performance.now() - S.prepStart;    // 冻结准备期
+    } else {
+      audio.pause();
+    }
+  } else {
+    S.resuming = false;
+    resumePlayback();                                   // 直接恢复（不带倒计时）
+  }
+}
+
+/* 暂停后点"继续"：播放中先倒计时 RESUME_LEAD 再恢复，给玩家准备时间 */
+function startResume() {
+  if (!S.paused) return;
+  S.paused = false;
+  document.getElementById('pause').classList.remove('show');
+  if (S.phase === 'prep') {
+    resumePlayback();                     // 开场准备期暂停：直接继续原有倒计时
+    return;
+  }
+  S.resuming = true;
+  S.resumeStart = performance.now();
+  cdEl.textContent = Math.ceil(RESUME_LEAD / 1000);
+  cdEl.classList.add('show');
+}
+
+/* 真正恢复播放（WA resume / 元素 resync+play / 准备期继续倒计时） */
+function resumePlayback() {
+  if (S.mode === 'wa') {
+    actx.resume();
+  } else if (S.phase === 'prep') {
+    S.prepStart = performance.now() - S.prepAccum;
+  } else {
+    S.resync = true;                      // 恢复后重新锚定音频时钟
+    audio.play().catch(function () {});
+  }
+}
+
+/* ---------- 结束 ---------- */
+/**
+ * 歌曲结束 → 结算。
+ * 设计约束：这个函数里的**任何一步失败都不能阻止结算层显示**。
+ *   历史 bug：写成绩用了裸 localStorage.setItem，一旦它抛
+ *   QuotaExceededError（配额满 / 隐私模式 / 站点数据被策略拦截 / file:// 只读），
+ *   函数在写成绩处中断 → 结算层永不出现 → 玩家卡在打完的轨道上（"无法正常退出"）。
+ *   已改为 LS 包装 + 全程 try/catch，存储不可用只影响"成绩能不能存下来"这一件事。
+ */
+function finish() {
+  if (S.phase === 'ended') return;
+
+  /* 先取真实时刻再改 phase：songTime() 在 ended 下会返回 lastEnd+99999（仅供渲染），
+     不能拿来结算残留长按。 */
+  var endT = songTime();
+  if (!isFinite(endT)) endT = S.lastT;
+
+  S.phase = 'ended';
+  cancelAnimationFrame(S.raf);
+  setJudgeFeedback(false);   // v2.15：清场 —— 结算页里 keyup 会被 return，靠松手清不掉
+  if (S.mode === 'wa') {
+    try { if (waSource) waSource.stop(); } catch (e) {}
+  } else {
+    try { audio.pause(); } catch (e) {}
+  }
+  cdEl.classList.remove('show');
+
+  /* 歌曲结束时仍被按住的最后一条长按：按当前时刻立刻结算，让 liveAward 归零、
+     最终分数与准确率才是准确的（否则残留的实时加分既没计入统计也没被扣除）。
+     判分口径与 autoResolve 的超时保底一致：已经按到 E（或更久）还没松手
+     → 至多扣到 GOOD（确实按到位了，只是没精确松手），不判 MISS。
+     旧代码用了一个从未赋值的 S.endT → NaN → judgeRelease 返回 null → 一律 MISS。 */
+  for (var i = 0; i < S.spawnIdx; i++) {
+    var hn = S.notes[i];
+    if (hn.type !== 2 || hn.state !== 1) continue;
+    var g;
+    if (endT >= hn.end) {
+      g = worseGrade(hn.headGrade, 'GOOD');
+    } else {
+      var jr = judgeRelease(endT - hn.end);
+      g = worseGrade(hn.headGrade, jr ? jr.grade : 'MISS');
+    }
+    resolveNote(hn, GRADE_WEIGHT[g], g);
+  }
+  S.liveAward = 0;
+
+  var score = Math.round(1000000 * S.sumWeight / Math.max(1, S.totalWeight));
+  var rank = gradeRank(score);
+  var acc = +(100 * S.sumWeight / Math.max(1, S.totalWeight)).toFixed(2);
+
+  /* 成绩读写全部走 LS 包装：拿不到 best 就当作没有记录，写不进去也不影响流程 */
+  var best = null;
+  try { best = JSON.parse(LS.get('rhythm_best_' + songId) || 'null'); } catch (e) { best = null; }
+  var isNew = !best || score > best.score;
+  var saved = true;
+  if (isNew) {
+    saved = LS.set('rhythm_best_' + songId, JSON.stringify({
+      score: score, rank: rank, maxCombo: S.maxCombo, acc: acc
+    }));
+  }
+
+  document.getElementById('resRank').textContent = rank;
+  document.getElementById('resRank').style.color =
+    rank === 'SS' || rank === 'S' ? 'var(--perfect)' :
+    rank === 'A' ? 'var(--great)' : 'var(--text)';
+  document.getElementById('resScore').textContent = score.toLocaleString();
+  document.getElementById('resBest').textContent =
+    isNew ? (saved ? '★ 新纪录！' : '★ 新纪录（本地存储不可用，未保存）')
+          : (best && typeof best.score === 'number' ? '历史最佳：' + best.score.toLocaleString() : '');
+  document.getElementById('stP').textContent = S.stats.PERFECT;
+  document.getElementById('stG').textContent = S.stats.GREAT;
+  document.getElementById('stO').textContent = S.stats.GOOD;
+  document.getElementById('stM').textContent = S.stats.MISS;
+  document.getElementById('stCombo').textContent = S.maxCombo;
+
+  /* 结算层显示 —— 放在最后、且前面所有步骤都已容错，确保它一定能亮出来 */
+  document.getElementById('result').classList.add('show');
+
+  /* 轨道上残留的音符（还在下落 / 未被判定的）在结算层后面会透出来（遮罩是半透明的）。
+     等打碎动画播完再清掉，画面才干净。 */
+  setTimeout(function () {
+    if (noteLayer) noteLayer.innerHTML = '';
+    if (fxLayer) fxLayer.innerHTML = '';
+  }, 900);
+}
+</script>
+</body>
+</html>
