@@ -4,37 +4,37 @@
    顺序即播放页右侧皮肤栏的顺序；可在 role/<皮肤>/skin.json 里写 {"name":"显示名","order":10}。 */
 window.RHYTHM_SKINS = [
   {
-    "id": "芙宁娜",
+    "id": "furina",
     "name": "芙宁娜",
-    "order": 999,
-    "background": "role/芙宁娜/Background.png",
-    "tap": "role/芙宁娜/D.png",
-    "head": "role/芙宁娜/R.png",
-    "trail": "role/芙宁娜/Trailing.png",
-    "palette": "芙宁娜",
-    "preview": "role/芙宁娜/Background.png"
+    "order": 10,
+    "background": "role/furina/Background.png",
+    "tap": "role/furina/D.png",
+    "head": "role/furina/R.png",
+    "trail": "role/furina/Trailing.png",
+    "palette": "furina",
+    "preview": "role/furina/Background.png"
   },
   {
-    "id": "流萤",
+    "id": "firefly",
     "name": "流萤",
-    "order": 999,
-    "background": "role/流萤/Background.png",
-    "tap": "role/流萤/D.png",
-    "head": "role/流萤/R.png",
-    "trail": "role/流萤/Trailing.png",
-    "palette": "流萤",
-    "preview": "role/流萤/Background.png"
+    "order": 20,
+    "background": "role/firefly/Background.png",
+    "tap": "role/firefly/D.png",
+    "head": "role/firefly/R.png",
+    "trail": "role/firefly/Trailing.png",
+    "palette": "firefly",
+    "preview": "role/firefly/Background.png"
   },
   {
-    "id": "星见雅",
+    "id": "miyabi",
     "name": "星见雅",
-    "order": 999,
-    "background": "role/星见雅/Background.png",
-    "tap": "role/星见雅/D.png",
-    "head": "role/星见雅/R.png",
-    "trail": "role/星见雅/Trailing.png",
-    "palette": "星见雅",
-    "preview": "role/星见雅/Background.png"
+    "order": 30,
+    "background": "role/miyabi/Background.png",
+    "tap": "role/miyabi/D.png",
+    "head": "role/miyabi/R.png",
+    "trail": "role/miyabi/Trailing.png",
+    "palette": "miyabi",
+    "preview": "role/miyabi/Background.png"
   }
 ];
-window.RHYTHM_SKINS_DEFAULT = "芙宁娜";
+window.RHYTHM_SKINS_DEFAULT = "furina";

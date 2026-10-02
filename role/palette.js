@@ -2,43 +2,7 @@
    重新生成：node gen_palette.js
    为什么不用运行时 canvas 取样：file:// 下画布会被污染，getImageData 抛 SecurityError。 */
 window.RHYTHM_ROLE_PALETTE = {
-  "芙宁娜": {
-    "tap": [
-      "#f4f2f0",
-      "#cddbe5",
-      "#cac3a5",
-      "#008dec",
-      "#6376ab",
-      "#7d6db3"
-    ],
-    "tapMiss": [
-      "#b7b1b1",
-      "#afb3b7",
-      "#b3b2ae",
-      "#5e717e"
-    ],
-    "hold": [
-      "#f7f3ee",
-      "#d1c0b5",
-      "#a38d83",
-      "#5777c5",
-      "#addcf9",
-      "#76c4f6"
-    ],
-    "holdMiss": [
-      "#b5b2af",
-      "#b5b2b0",
-      "#908d8c",
-      "#737884"
-    ],
-    "key": "#f6f4f3",
-    "_src": {
-      "tap": "600x600",
-      "head": "442x442",
-      "trail": "374x1383"
-    }
-  },
-  "流萤": {
+  "firefly": {
     "tap": [
       "#f6f3ef",
       "#d8c9b6",
@@ -74,7 +38,43 @@ window.RHYTHM_ROLE_PALETTE = {
       "trail": "374x1342"
     }
   },
-  "星见雅": {
+  "furina": {
+    "tap": [
+      "#f4f2f0",
+      "#cddbe5",
+      "#cac3a5",
+      "#008dec",
+      "#6376ab",
+      "#7d6db3"
+    ],
+    "tapMiss": [
+      "#b7b1b1",
+      "#afb3b7",
+      "#b3b2ae",
+      "#5e717e"
+    ],
+    "hold": [
+      "#f7f3ee",
+      "#d1c0b5",
+      "#a38d83",
+      "#5777c5",
+      "#addcf9",
+      "#76c4f6"
+    ],
+    "holdMiss": [
+      "#b5b2af",
+      "#b5b2b0",
+      "#908d8c",
+      "#737884"
+    ],
+    "key": "#f6f4f3",
+    "_src": {
+      "tap": "600x600",
+      "head": "442x442",
+      "trail": "374x1383"
+    }
+  },
+  "miyabi": {
     "tap": [
       "#fcf1e8",
       "#cdc2b7",

@@ -16,7 +16,9 @@
  *     所以纯命令行用户要自己先跑一次那个 Python 脚本。
  *
  * 新增皮肤（一套一个文件夹，可多套，播放页右侧皮肤栏会一一列出）：
- *   1) 在 role/ 下新建文件夹，名字就是皮肤名，例如 role/芙宁娜/
+ *   1) 在 role/ 下新建文件夹，文件夹名即皮肤 id，例如 role/furina/
+ *      ★ id 必须纯 ASCII：中文名在 Windows 自带解压器下会乱码（见 rhythm/README.md 分发说明）；
+ *        中文显示名写在该文件夹的 skin.json 里：{"name":"芙宁娜","order":10}
  *   2) 放 png：Background.png / D.png / R.png / Trailing.png
  *      （缺图不报错：没背景就纯色底，没 D.png 借用 R.png，拖尾严格只用 Trailing.png）
  *   3) node build.js

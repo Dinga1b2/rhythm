@@ -53,6 +53,17 @@ chcp 65001 >nul
 set "MAKER=%~dp0music\Sheet Music Maker.py"
 set "RC=0"
 
+rem ---- preflight: this file needs the WHOLE rhythm\ folder --------------
+rem  Double-clicking a .cmd from inside a zip preview (Explorer's built-in
+rem  viewer, a download manager, a chat app's attachment view, ...) extracts
+rem  ONLY that single file into a temp folder and runs it there. The rest of
+rem  the project is not next to it, so every path below resolves to nothing.
+rem  Without this check the failure surfaces as a raw Python message such as
+rem  "can't open file ...: [Errno 2] No such file or directory", which tells
+rem  the user nothing about the actual cause. Catch it here instead.
+if not exist "%~dp0build.js" goto NOTOGETHER
+if not exist "%MAKER%" goto NOMAKER
+
 rem ---- locate node (required: step 2) ------------------------------------
 where node >nul 2>nul
 if errorlevel 1 goto NONODE
@@ -140,6 +151,36 @@ echo       .txt is updated in place, never appended.
 echo.
 pause
 exit /b %RC%
+
+:NOTOGETHER
+echo.
+echo [err] build.js is not next to this file - the rest of the project is missing.
+echo.
+echo       This file was started from:
+echo         "%~dp0"
+echo.
+echo       build.cmd only works INSIDE a complete copy of the rhythm folder.
+echo       It looks like it was started from inside a zip preview: Windows
+echo       then extracts just this ONE file to a temporary folder, and the
+echo       rest of the project is nowhere near it. That can never work.
+echo.
+echo       Fix: extract the WHOLE zip first (right-click it, then "Extract All"),
+echo            and double-click build.cmd inside the extracted folder.
+echo.
+pause
+exit /b 1
+
+:NOMAKER
+echo.
+echo [err] Cannot find the chart generator:
+echo         "%MAKER%"
+echo.
+echo       The project looks incomplete - build.js is here but the chart
+echo       generator is not. Re-extract the whole zip (or re-copy the whole
+echo       rhythm folder), then run this file again.
+echo.
+pause
+exit /b 1
 
 :NONODE
 echo.

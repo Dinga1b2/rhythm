@@ -49,10 +49,10 @@
     /* 皮肤（v2.14）：背景 + 三种音符图都由 role/skins.js 的清单驱动，
        右侧皮肤栏切换时统一改写这四个变量。下面只是清单加载前的默认值，
        新增/更换皮肤不需要动这几行 —— 在 role/ 下加文件夹后跑 node build.js 即可。 */
-    --bg-image: url('role/芙宁娜/Background.png');   /* 背景图：role/<皮肤名>/Background.png */
-    --tap-image: url('role/芙宁娜/D.png');           /* 短按音符 */
-    --head-image: url('role/芙宁娜/R.png');          /* 长按头 / 尾 */
-    --trail-image: url('role/芙宁娜/Trailing.png');  /* 长按拖尾（只拉伸/收缩，不替换） */
+    --bg-image: url('role/furina/Background.png');   /* 背景图：role/<皮肤id>/Background.png */
+    --tap-image: url('role/furina/D.png');           /* 短按音符 */
+    --head-image: url('role/furina/R.png');          /* 长按头 / 尾 */
+    --trail-image: url('role/furina/Trailing.png');  /* 长按拖尾（只拉伸/收缩，不替换） */
   }
   /* 响应式断点统一放在样式表末尾的「响应式」一区（v2.15 收敛），见文件底部。
      这里不再散着写媒体查询 —— 原来 --lane-w 用 1920/900/620/480、
@@ -562,7 +562,7 @@
 <div id="app">
   <header>
     <span class="title" id="hudTitle">音游</span>
-    <span id="verTag">v2.15.1</span>
+    <span id="verTag">v2.16</span>
     <span id="hudScore">0</span>
     <!-- v2.15：准确率实时回执。此前只有 #hudAcc 的样式与 JS 写入，markup 里没有这个元素
          （JS 靠 if (hudAcc) 空守卫兜着，所以从来没报错、也从来没显示过）。 -->
@@ -591,6 +591,8 @@
     <div class="setting"><svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84a.484.484 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.488.488 0 0 0-.59.22L2.74 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.27.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/></svg> <span>详细设置</span></div>
   </div>
   <div id="bottomRight">
+    <!-- 角色名：这里的文本只是首帧兜底，正常路径由 applySkin() 用 skins.js 的 name 覆盖。
+         约定：role/ 下的文件夹名（皮肤 id）一律 ASCII，显示名可以是中文 —— 见 README 分发说明。 -->
     <div class="role" id="brRole">芙宁娜</div>
     <div class="song" id="brSong">轻漾涟漪</div>
     <div class="status">使用中</div>
@@ -672,7 +674,13 @@
 <script>
 /**
  * ============================================================
- * 音游播放页（六键位下落式）v2.15
+ * 音游播放页（六键位下落式）v2.16
+ *  - v2.16（分发可用性）：role/ 与 music/ 下的目录名、文件名全部转为纯 ASCII，
+ *    中文显示名改由 role/<id>/skin.json → skins.js 的 name 提供，界面观感不变。
+ *    原因：zip 的「通用位标志第 11 位」标记文件名是否为 UTF-8，而 Windows 自带
+ *    解压器忽略该标志、按系统代码页（简中 GBK）解码 → 含中文名的包解压后必然
+ *    乱码，而本页读的 skins.js / charts.js 记的是 UTF-8 路径 → 图片音乐全 404。
+ *    详见 rhythm/README.md 与 .workbuddy/tests/test_dist_ascii.js。
  *  - 曲谱由 music/charts.js 提供（gen_songs.js 扫描 music/<id>/ 打包谱面原文），
  *    运行时用 chart.js parseChart 解析 → { t(ms), track 0-5, type 1短按|2长按, end }；
  *    音频 <audio src> 直接加载（file:// 与 http:// 均可用）。无需预编译 notes；
@@ -2224,9 +2232,12 @@ function finish() {
     rank === 'SS' || rank === 'S' ? 'var(--perfect)' :
     rank === 'A' ? 'var(--great)' : 'var(--text)';
   document.getElementById('resScore').textContent = score.toLocaleString();
+  /* 结算层同样遵守"没有有效记录就是 0"：降级路径不能留空，否则玩家看到一片空白，
+     既不知道有没有记录，也不知道该拿什么当参照。记录被写坏时也退到 0。 */
   document.getElementById('resBest').textContent =
     isNew ? (saved ? '★ 新纪录！' : '★ 新纪录（本地存储不可用，未保存）')
-          : (best && typeof best.score === 'number' ? '历史最佳：' + best.score.toLocaleString() : '');
+          : '历史最佳：' + (best && typeof best.score === 'number' && isFinite(best.score)
+                            ? best.score.toLocaleString() : '0');
   document.getElementById('stP').textContent = S.stats.PERFECT;
   document.getElementById('stG').textContent = S.stats.GREAT;
   document.getElementById('stO').textContent = S.stats.GOOD;

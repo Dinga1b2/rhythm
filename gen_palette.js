@@ -7,7 +7,9 @@
  *                    并按选中项一次性套用 背景 + 短按图 + 长按头图 + 拖尾图 + 粉末配色
  *
  * 新增皮肤（本地操作，三步，不需要改任何 HTML/CSS）：
- *   1) 在 role/ 下新建文件夹，名字就是皮肤名，例如 role/芙宁娜/
+ *   1) 在 role/ 下新建文件夹，文件夹名即皮肤 id，例如 role/furina/
+ *      ★ id 必须纯 ASCII：中文名在 Windows 自带解压器下会乱码（见 rhythm/README.md 分发说明）；
+ *        中文显示名写在该文件夹的 skin.json 里：{"name":"芙宁娜","order":10}
  *   2) 放四张 png：Background.png（背景）/ D.png（短按）/ R.png（长按头尾）/ Trailing.png（长按拖尾）
  *      缺哪张都不报错：少背景就只有纯色底，少 D.png 会借用 R.png，拖尾严格只用 Trailing.png
  *      可选：放一个 skin.json = {"name":"显示名","order":10} 覆盖显示名与排序
@@ -238,7 +240,7 @@ function adjust(rgb, { sat = 1, light = 0 } = {}) {
 
 /**
  * 把相对亮度钳到 [min, max] 区间（保持色相/饱和度不变，只调明度）。
- * 为什么需要：图片里常有色相很好但极暗的颜色（芙宁娜 D.png 里的 #130f1d 近黑），
+ * 为什么需要：图片里常有色相很好但极暗的颜色（furina 的 D.png 里的 #130f1d 近黑），
  * 直接拿来做粉末在深色背景上等于看不见。粉末是加亮的视觉元素，必须有亮度下限。
  */
 function clampLum(rgb, min, max) {

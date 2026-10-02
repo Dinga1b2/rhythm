@@ -76,26 +76,28 @@
   <div class="head">
     <h1>🎵 音游</h1>
     <span class="sub">六键位下落式（S D F J K L） · 曲目互相独立 · 点击在新网页开始</span>
-    <a class="back" href="../index.html">← 模块面板</a>
+    <!-- 只把 rhythm/ 上传到仓库时，上级目录并不存在 —— 越级链接（../index.html）必然 404。
+         这里改为同目录的 README（纯相对路径，双击本地打开与在 GitHub 上查看都有效）。 -->
+    <a class="back" href="README.md">📖 使用说明</a>
   </div>
 
   <div class="grid" id="songGrid"></div>
   <div class="empty" id="emptyTip" style="display:none">
-    曲库为空：先在 <code>rhythm/music/</code> 下新建一个文件夹（文件夹名 = 曲名），<br>
-    放一个 <code>.mp3</code> 进去（<b>不用</b>准备谱面），再跑一次 <code>node rhythm/build.js</code><br>
-    （在 rhythm/ 下则 <code>node build.js</code>；<b>Windows 直接双击 <code>rhythm/build.cmd</code></b>
-    —— 它会自动补好谱面再打包）。
+    曲库为空：先在 <code>music/</code> 下新建一个文件夹（文件夹名 = 曲名），<br>
+    放一个 <code>.mp3</code> 进去（<b>不用</b>准备谱面），再跑一次 <code>node build.js</code><br>
+    （<b>Windows 直接双击 <code>build.cmd</code></b> —— 它会自动补好谱面再打包）。
   </div>
 
   <!-- 本地新增资源操作（点开看到就好，用不着就关） -->
   <div class="hint">
     <h2>本地新增曲目 / 皮肤（连谱面都自动生成）</h2>
-    <b>新增曲目</b>：在 <code>rhythm/music/曲名/</code> 里放一个 <code>.mp3</code> 即可（<b>不需要</b>自己写谱面）<br>
-    <b>新增皮肤</b>：在 <code>rhythm/role/皮肤名/</code> 里放四张 png：
+    <b>新增曲目</b>：在 <code>music/曲名/</code> 里放一个 <code>.mp3</code> 即可（<b>不需要</b>自己写谱面）<br>
+    <b>新增皮肤</b>：在 <code>role/皮肤id/</code> 里放四张 png：
     <code>Background.png / D.png / R.png / Trailing.png</code>（缺图不报错，会降级；<br>
-    想调整显示名或顺序可在该文件夹下加 <code>skin.json</code>，写 <code>{"name":"显示名","order":10}</code>）<br>
-    然后跑 <code>node rhythm/build.js</code>，皮肤可在 <b>多套</b>，游戏页右侧「皮肤栏」会一一列出，点一下即换。<br>
-    <b>Windows 用户直接双击 <code>rhythm/build.cmd</code></b>：它会先为缺谱面的曲目自动生成谱面，
+    文件夹名（皮肤 id）请用<b>纯 ASCII</b>，例如 <code>furina</code> —— 中文名在部分解压工具下会乱码；
+    界面上的中文显示名写在该文件夹的 <code>skin.json</code> 里：<code>{"name":"芙宁娜","order":10}</code>）<br>
+    然后跑 <code>node build.js</code>，皮肤可以放 <b>多套</b>，游戏页右侧「皮肤栏」会一一列出，点一下即换。<br>
+    <b>Windows 用户直接双击 <code>build.cmd</code></b>：它会先为缺谱面的曲目自动生成谱面，
     再重新打包曲库与皮肤 —— 打一次命令就够，已有的曲目和皮肤完全不会被改动。
   </div>
 
