@@ -122,10 +122,15 @@
       var best = null;
       try { best = JSON.parse(localStorage.getItem('rhythm_best_' + id) || 'null'); } catch (e) {}
 
-      var bestHtml = best
+      /* 新用户（从来没有记录，或记录被写坏）时，历史最佳一律显示 0，不显示"暂无记录"。
+         理由：开局前就给一个明确的可比较基准，玩家一眼知道"现在是 0，打完看涨多少"；
+         另外结算层是"超过历史最佳即新纪录"，0 也是最自然的下界。
+         只有分数是有效数字才算有记录 —— 防止 {} / {score:null} 之类脏数据渲染出 undefined。 */
+      var hasBest = !!(best && typeof best.score === 'number' && isFinite(best.score));
+      var bestHtml = hasBest
         ? '<span class="best">历史最佳：<b>' + best.score.toLocaleString() + '</b>（' +
           best.rank + ' · ' + best.acc + '% · ' + best.maxCombo + ' 连击）</span>'
-        : '<span class="best">暂无记录 —— 来刷新纪录吧</span>';
+        : '<span class="best">历史最佳：<b>0</b></span>';
 
       return '<a class="song-card" href="player.html?r=26#song=' + id + '" target="_blank" rel="noopener noreferrer">' +
         '<span class="name">' + esc(s.title) + '</span>' +
