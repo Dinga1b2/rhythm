@@ -432,6 +432,45 @@ function main() {
   skins.sort((a, b) => (a.order - b.order) || a.id.localeCompare(b.id, 'zh'));
   const defId = skins.length ? skins[0].id : '';
 
+  /* ---------- 体检 1：疑似"新旧两版叠加"造成的重复皮肤 ----------
+     真实踩过的坑：旧版皮肤文件夹用中文名（role/芙宁娜），v2.16 起统一改成 ASCII
+     （role/furina）并由 skin.json 提供中文显示名。Windows 解压**不会删除**已存在的
+     旧文件夹 —— 把新包解压到旧包目录上，role/ 下就会新旧并存，于是皮肤栏出现 6 项、
+     名字两两重复（用户报告的原话："有六个皮肤，实际上只有 3 个，剩下三个重复了"）。
+     只警告不阻断：极小概率是"故意做了两套同名皮肤"，不该因此拒绝构建。 */
+  const byDisplayName = {};
+  skins.forEach((s) => { (byDisplayName[s.name] = byDisplayName[s.name] || []).push(s.id); });
+  Object.keys(byDisplayName).forEach((nm) => {
+    const ids = byDisplayName[nm];
+    if (ids.length < 2) return;
+    term.warn(
+      `疑似重复皮肤：显示名「${nm}」对应 ${ids.length} 个文件夹 —— ${ids.join(' / ')}。` +
+      `最常见的原因是把新版本解压到了旧版本目录上（Windows 解压不会删掉已有的旧文件夹），` +
+      `新旧皮肤文件夹并存，皮肤栏就会多出重复项。` +
+      `处理：删掉旧的那套皮肤文件夹（旧版是中文文件夹名），或重新解压到空目录，再重跑 build。`,
+      `possible duplicate skins: the display name "${nm}" is shared by ${ids.length} folders ` +
+      `(${ids.join(' / ')}). This usually means a new version was extracted over an old one; ` +
+      `remove the stale skin folder(s) and rebuild.`
+    );
+  });
+
+  /* ---------- 体检 2：皮肤 id（文件夹名）含非 ASCII ----------
+     分发硬约束：zip 的 UTF-8 标志位会被 Windows 自带解压器忽略，含中文名的包解压后
+     必然乱码，而 skins.js 记的是 UTF-8 路径 → 请求 404 → 皮肤全丢。
+     显示名想用中文请写进 role/<id>/skin.json 的 name 字段。 */
+  const nonAsciiIds = skins.map((s) => s.id).filter((id) => !/^[\x20-\x7E]+$/.test(id));
+  if (nonAsciiIds.length) {
+    term.warn(
+      `皮肤文件夹名含非 ASCII 字符：${nonAsciiIds.join(', ')}。` +
+      `这类名字在 Windows 自带解压器下会乱码（zip 的 UTF-8 标志位被忽略），` +
+      `别人下载 zip 解压后会找不到图片。请把文件夹名改成纯英文，` +
+      `中文显示名写进该文件夹的 skin.json（{"name":"显示名","order":10}）。`,
+      `skin folder name(s) contain non-ASCII characters: ${nonAsciiIds.join(', ')}. ` +
+      `They will be mojibake'd by Windows' built-in unzip (which ignores the zip UTF-8 flag), ` +
+      `so downloaded copies will 404. Rename to plain ASCII and put the display name in skin.json.`
+    );
+  }
+
   /* palette.js —— 保持既有格式（单条赋值；测试按 "= " 与 ";" 切片解析，别改结构） */
   const js = '/* 自动生成，请勿手改 —— 由 gen_palette.js 从 role/<角色>/*.png 提取关键色。\n' +
     '   重新生成：node gen_palette.js\n' +
